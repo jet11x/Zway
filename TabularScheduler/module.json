@@ -1,0 +1,527 @@
+{
+  "singleton": false,
+  "dependencies": [
+    "Cron",
+    "Presence",
+    "BaseModule",
+    "Astronomy"
+  ],
+  "category": "automation_basic",
+  "author": "John Talintyre",
+  "homepage": "",
+  "icon": "icon.png",
+  "moduleName": "TabularScheduler",
+  "version": "0.0.1",
+  "maturity": "beta",
+  "defaults": {
+    "title": "__m_title__",
+    "description": "__m_descr__",
+    "timetable": [
+      {
+        "presence": "any",
+        "days": "All",
+        "startType": "time",
+        "startTime": "00:00",
+        "endType": "time",
+        "endTime": "00:00"
+      }
+    ],
+    "helpText": "__help_title__",
+    "startRand": {
+      "maxAdj": "00:10"
+    },
+    "endRand": {
+      "maxAdj": "00:10"
+    },
+    "logging": {
+      "level": "summary",
+      "what": [
+        "start",
+        "end",
+        "scheduling",
+        "init"
+      ]
+    }
+  },
+  "schema": {
+    "type": "object",
+    "properties": {
+      "timetable": {
+        "title": "__table_title__",
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "presence": {
+              "type": "string",
+              "title": "__table_presence_title__",
+              "enum": [
+                "any",
+                "home",
+                "away",
+                "vacation"
+              ]
+            },
+            "randomise": {
+              "title": "__table_random_title__",
+              "type": "string",
+              "enum": [
+                "yes",
+                "no"
+              ]
+            },
+            "days": {
+              "title": "__table_days_title__",
+              "type": "string",
+              "enum": [
+                "All",
+                "Weekends",
+                "Weekdays"
+              ],
+              "default": "All"
+            },
+            "startType": {
+              "type": "string",
+              "title": "__table_start_type_title__",
+              "enum": [
+                "time",
+                "sunsetPlus",
+                "sunsetMinus",
+                "sunrisePlus",
+                "sunriseMinus"
+              ],
+              "default": "time"
+            },
+            "startTime": {
+              "type": "string",
+              "title": "__table_start_time_title__",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "default": "00:00"
+            },
+            "endType": {
+              "type": "string",
+              "title": "__table_end_type_title__",
+              "enum": [
+                "time",
+                "sunsetPlus",
+                "sunsetMinus",
+                "sunrisePlus",
+                "sunriseMinus"
+              ],
+              "default": "time"
+            },
+            "endTime": {
+              "type": "string",
+              "title": "__table_end_time_title__",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "default": "00:00"
+            },
+            "config": {
+              "type": "string",
+              "title": "__table_config_title__"
+            }
+          }
+        }
+      },
+      "showHelp": {
+        "type": "string",
+        "enum": [
+          "Showing help"
+        ]
+      },
+      "helpText": {
+        "type": "string",
+        "readonly": true,
+        "dependencies": [
+          "showHelp"
+        ]
+      },
+      "startRand": {
+        "type": "object",
+        "properties": {
+          "randType": {
+            "type": "string",
+            "title": "Randomly Move Start Time - affects table entries where Random column is Yes",
+            "enum": [
+              "evenUp",
+              "evenDown",
+              "evenUpDown"
+            ]
+          },
+          "maxAdj": {
+            "type": "string",
+            "pattern": "^(0[0-9]:[0-5][0-9]$"
+          }
+        },
+        "dependencies": {
+          "maxAdj": [
+            "randType"
+          ]
+        }
+      },
+      "endRand": {
+        "type": "object",
+        "properties": {
+          "randType": {
+            "type": "string",
+            "title": "Randomly Move End Time - affects table entries where Random column is Yes",
+            "enum": [
+              "evenUp",
+              "evenDown",
+              "evenUpDown"
+            ]
+          },
+          "maxAdj": {
+            "type": "string",
+            "pattern": "^(0[0-9]:[0-5][0-9]$"
+          }
+        },
+        "dependencies": {
+          "maxAdj": [
+            "randType"
+          ]
+        }
+      },
+      "switches": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "filter": {
+              "type": "string",
+              "enum": [
+                "switchBinary",
+                "switchMultilevel",
+                "toggleButton"
+              ],
+              "required": true
+            },
+            "switchBinary": {
+              "type": "object",
+              "dependencies": "filter",
+              "properties": {
+                "device": {
+                  "type": "string",
+                  "field": "enum",
+                  "datasource": "namespaces",
+                  "enum": "namespaces:devices_switchBinary:deviceId",
+                  "required": true
+                },
+                "ref": {
+                  "type": "string"
+                }
+              }
+            },
+            "switchMultilevel": {
+              "type": "object",
+              "dependencies": "filter",
+              "properties": {
+                "device": {
+                  "datasource": "namespaces",
+                  "enum": "namespaces:devices_switchMultilevel:deviceId,namespaces:devices_switchRGBW:deviceId",
+                  "field": "enum",
+                  "required": true,
+                  "type": "string"
+                },
+                "startLevel": {
+                  "maximum": "99",
+                  "minimum": "0",
+                  "required": true,
+                  "type": "integer"
+                },
+                "endLevel": {
+                  "maximum": "99",
+                  "minimum": "0",
+                  "required": true,
+                  "type": "integer"
+                },
+                "ref": {
+                  "type": "string"
+                }
+              }
+            },
+            "toggleButton": {
+              "type": "object",
+              "dependencies": "filter",
+              "properties": {
+                "startScene": {
+                  "type": "string",
+                  "field": "enum",
+                  "datasource": "namespaces",
+                  "enum": "namespaces:devices_toggleButton:deviceId",
+                  "required": true
+                },
+                "endScene": {
+                  "type": "string",
+                  "field": "enum",
+                  "datasource": "namespaces",
+                  "enum": "namespaces:devices_toggleButton:deviceId"
+                },
+                "ref": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "logging": {
+        "title": "What should be logged in z-way-server.log (usual location is /var/log)?",
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "string",
+            "title": "Logging Level",
+            "enum": [
+              "summary",
+              "detailed"
+            ]
+          },
+          "what": {
+            "type": "string",
+            "title": "What should be logged?",
+            "enum": [
+              "start",
+              "end",
+              "scheduling",
+              "init"
+            ]
+          }
+        },
+        "dependencies": {
+          "what": [
+            "level"
+          ]
+        }
+      }
+    }
+  },
+  "options": {
+    "fields": {
+      "timetable": {
+        "type": "table",
+        "items": {
+          "fields": {
+            "presence": {
+              "type": "select",
+              "removeDefaultNone": true,
+              "sort": false,
+              "optionLabels": [
+                "Any",
+                "Home",
+                "Away",
+                "Vacation"
+              ]
+            },
+            "randomise": {
+              "type": "select",
+              "removeDefaultNone": true,
+              "optionLabels": [
+                "Yes",
+                "No"
+              ]
+            },
+            "days": {
+              "type": "select"
+            },
+            "startType": {
+              "type": "select",
+              "optionLabels": [
+                "Time",
+                "Sunset+Time",
+                "Sunset-Time",
+                "Sunrise+Time",
+                "Sunrise-Time"
+              ],
+              "removeDefaultNone": true,
+              "sort": false
+            },
+            "startTime": {
+              "maskString": "99:99",
+              "size": 4
+            },
+            "endType": {
+              "type": "select",
+              "removeDefaultNone": true,
+              "sort": false,
+              "optionLabels": [
+                "Time",
+                "Sunset+Time",
+                "Sunset-Time",
+                "Sunrise+Time",
+                "Sunrise-Time"
+              ]
+            },
+            "endTime": {
+              "type": "text",
+              "maskString": "99:99",
+              "size": 4
+            },
+            "config": {
+              "type": "text",
+              "size": 8
+            }
+          }
+        }
+      },
+      "showHelp": {
+        "type": "select",
+        "noneLabel": "Not showing help"
+      },
+      "helpText": {
+        "type": "text",
+        "helpers": [
+          "__help_presence__",
+          "__help_random__",
+          "__help_days__",
+          "__help_start_type__",
+          "__help_start_time__",
+          "__help_end_type__",
+          "__help_end_time__",
+          "__help_config__",
+          "__help_config_examples__"
+        ]
+      },
+      "startRand": {
+        "fields": {
+          "randType": {
+            "type": "select",
+            "optionLabels": [
+              "Even Up (increase time by evenly spread random number of hours/mins up to specified max HH:mm)",
+              "Even Down (decrease time by evenly spread random number of hours/mins up to specified max HH:mm)",
+              "Even Up & Down (increase/decrease time by evenly spread random number between -HH:mm/2 and +HH:mm/2"
+            ]
+          },
+          "maxAdj": {
+            "helper": "__rand_maxAdj__"
+          }
+        }
+      },
+      "endRand": {
+        "fields": {
+          "randType": {
+            "type": "select",
+            "optionLabels": [
+              "Even Up (increase time by evenly spread random number of hours/mins up to specified max HH:mm)",
+              "Even Down (decrease time by evenly spread random number of hours/mins up to specified max HH:mm)",
+              "Even Up & Down (increase/decrease time by evenly spread random number between -HH:mm/2 and +HH:mm/2"
+            ]
+          },
+          "maxAdj": {
+            "helper": "__rand_maxAdj__"
+          }
+        }
+      },
+      "switches": {
+        "label": "__l_switches__",
+        "items": {
+          "fields": {
+            "filter": {
+              "type": "select",
+              "removeDefaultNone": false,
+              "noneLabel": "__l_choose_type__",
+              "label": "__l_filter__",
+              "optionLabels": [
+                "__switchBinary__",
+                "__switchMultilevel__",
+                "__toggleButton__"
+              ]
+            },
+            "switchBinary": {
+              "dependencies": {
+                "filter": "switchBinary"
+              },
+              "fields": {
+                "device": {
+                  "type": "select",
+                  "removeDefaultNone": false,
+                  "noneLabel": "__l_choose_dev__",
+                  "datasource": "namespaces",
+                  "field": "optionLabels",
+                  "optionLabels": "namespaces:devices_switchBinary:deviceName"
+                },
+                "ref": {
+                  "type": "text",
+                  "helper": "Optional reference that can be used in <b>Config</b> column of table of schedule entries"
+                }
+              }
+            },
+            "switchMultilevel": {
+              "dependencies": {
+                "filter": "switchMultilevel"
+              },
+              "fields": {
+                "device": {
+                  "datasource": "namespaces",
+                  "field": "optionLabels",
+                  "noneLabel": "__l_choose_dev__",
+                  "optionLabels": "namespaces:devices_switchMultilevel:deviceName,namespaces:devices_switchRGBW:deviceName",
+                  "removeDefaultNone": false,
+                  "type": "select"
+                },
+                "startLevel": {
+                  "type": "integer",
+                  "helper": "Level to set to at start"
+                },
+                "endLevel": {
+                  "type": "integer",
+                  "helper": "Level to set to at end"
+                },
+                "ref": {
+                  "type": "text",
+                  "helper": "Optional reference that can be used in <b>Config</b> column of table of schedule entries"
+                }
+              }
+            },
+            "toggleButton": {
+              "dependencies": {
+                "filter": "toggleButton"
+              },
+              "fields": {
+                "startScene": {
+                  "type": "select",
+                  "removeDefaultNone": false,
+                  "noneLabel": "__l_choose_dev__",
+                  "label": "__l_startScene__",
+                  "datasource": "namespaces",
+                  "field": "optionLabels",
+                  "optionLabels": "namespaces:devices_toggleButton:deviceName"
+                },
+                "endScene": {
+                  "type": "select",
+                  "removeDefaultNone": false,
+                  "noneLabel": "__l_choose_dev__",
+                  "label": "__l_endScene__",
+                  "datasource": "namespaces",
+                  "field": "optionLabels",
+                  "optionLabels": "namespaces:devices_toggleButton:deviceName"
+                },
+                "ref": {
+                  "type": "text",
+                  "helper": "Optional reference that can be used in <b>Config</b> column of table of schedule entries"
+                }
+              }
+            }
+          }
+        }
+      },
+      "logging": {
+        "fields": {
+          "level": {
+            "type": "select",
+            "noneLabel": "Nothing",
+            "optionLabels": [
+              "Summary",
+              "Detailed"
+            ]
+          },
+          "what": {
+            "type": "checkbox",
+            "multiple": true
+          }
+        }
+      }
+    }
+  }
+}
