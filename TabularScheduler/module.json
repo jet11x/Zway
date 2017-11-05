@@ -11,7 +11,7 @@
   "homepage": "",
   "icon": "icon.png",
   "moduleName": "TabularScheduler",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "maturity": "beta",
   "defaults": {
     "title": "__m_title__",
