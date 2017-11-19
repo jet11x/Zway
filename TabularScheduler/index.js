@@ -432,6 +432,7 @@ TabularScheduler.prototype.getTime = function (type, timeAdjust) {
         default:
             self.error("Unknown time type: " + startType);
     }
+    time.setSeconds(0,0); // Cron module only goes down to minutes
     self.debug("getTime time set to ", time, " now=", now);
     if (time.getTime() <= now.getTime()) {
         time.setHours(time.getHours() + 24);
@@ -519,20 +520,16 @@ TabularScheduler.prototype.parseEntryConfig = function (config) {
 
 TabularScheduler.prototype.getSunset = function () {
     var self = this;
-    var sunset = self.getDeviceValue([
+    return self.getDeviceValue([
         ['probeType', '=', 'astronomy_sun_altitude']
     ], 'metrics:sunset');
-    sunset.setSeconds(0,0); // So cron triggered time isn't after this
-    return sunset;
 };
 
 TabularScheduler.prototype.getSunrise = function () {
     var self = this;
-    var sunrise = self.getDeviceValue([
+    return self.getDeviceValue([
         ['probeType', '=', 'astronomy_sun_altitude']
     ], 'metrics:sunrise');
-    sunrise.setSeconds(0,0);
-    return sunrise;
 };
 
 TabularScheduler.prototype.shortDateTime = function(date) {

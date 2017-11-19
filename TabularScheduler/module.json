@@ -11,7 +11,7 @@
   "homepage": "https://github.com/jet11x/Zway/tree/master/TabularScheduler",
   "icon": "icon.png",
   "moduleName": "TabularScheduler",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "maturity": "beta",
   "defaults": {
     "title": "__m_title__",

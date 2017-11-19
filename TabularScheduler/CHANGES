@@ -1,4 +1,7 @@
-0.0.3
+0.0.4 19-Nov-17
+  * Correctly zeroing secs, millisecs for sunrise/sunset
+
+0.0.3 19-Nov-17
   * Fixed scheduling of randomised and sunrise/sunset entries (zerod seconds, milliseconds)
   * Removed rescheduled when Presence changes from/to night/home
   * Tidied up logging output
