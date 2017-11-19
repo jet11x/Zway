@@ -25,17 +25,43 @@ describe('TabularScheduler', function() {
 
     executeFile('test/AutomationControllerMock.js', this);
     executeFile('test/BaseModuleMock.js', this);
-
     executeFile('TabularScheduler/index.js', this);
 
     var controller = new this.AutomationController();
 
     var baseNow = new Date(2017, 9, 8, 9, 1); // Sunday, BST
     var now = new Date(baseNow.getTime());
+    var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    function getHRDateformat(now) {
+        var ts = now.getFullYear() + "-";
+        ts += ("0" + (now.getMonth() + 1)).slice(-2) + "-";
+        ts += ("0" + now.getDate()).slice(-2) + " ";
+        ts += ("0" + now.getHours()).slice(-2) + ":";
+        ts += ("0" + now.getMinutes()).slice(-2);
+        ts += " " + days[now.getDay()];
+
+        return ts;
+    };
     this.TabularScheduler.prototype.now = function() {
         //return new Date(this.nowDate.getTime());
         return new Date(now.getTime());
     };
+    this.TabularScheduler.prototype.log = function(message) {
+        self = this;
+        console.log(getHRDateformat(self.now()) + " " + message);
+    };
+
+    function resetNow() {
+        now = new Date(baseNow.getTime());
+        console.log(getHRDateformat(now) + " time changed");
+    }
+
+    function changeNow(daysForward, hours, minutes) {
+        now.setHours(hours, minutes);
+        now.setHours(now.getHours() + 24*daysForward);
+        console.log(getHRDateformat(now) + " time changed");
+    }
+
     var ts = new this.TabularScheduler(1, controller);
 
     var dev1 = "ZWayVDev_zway_15-0-37";
@@ -107,10 +133,11 @@ describe('TabularScheduler', function() {
     ts.metrics[['probeType','=','astronomy_sun_altitude'].join(""),'metrics:sunset'] = sunset;
     ts.metrics[['probeType','=','presence'].join(""),'metrics:mode'] = "home";
 
-    ts.init(config);
+    //ts.init(config);
 
     describe('start/stop presence=any', function() {
         it('start/end and reschedule presence=any', function() {
+            ts.init(config);
             var times = ts.times;
             var start = times[0].switches[0].start;
             var end = times[0].switches[0].end;
@@ -180,8 +207,7 @@ describe('TabularScheduler', function() {
             config.timetable[0].presence = "home";
             ts.metrics[['probeType','=','presence'].join(""),'metrics:mode'] = "away";
             ts.init(config);
-            //console.log(times);
-            assert.equal(19, ts.times[0].switches[0].start.getHours());
+            assert(ts.times[0].switches[0].start == null);
             assert(!ts.times[0].active, "Shouldn't be active");
             now.setHours(19,1); // At start time for entry 0 in timetable
             ts.startAction();
@@ -194,8 +220,46 @@ describe('TabularScheduler', function() {
             ts.stop();
             controller.reset();
             config = baseConfig();
-            now = new Date(baseNow.getTime());
+            resetNow();
             ts.metrics[['probeType', '=', 'presence'].join(""), 'metrics:mode'] = "home";
+        });
+
+        it('first timetable entry as randomise, to start tomorrow with start/end rand', function() {
+            config.timetable[0].days = "Weekdays";
+            config.timetable.splice(1,1);
+            config.switches.splice(1,2); // Now only have 1 entry and 1 switch
+            config.timetable[0].randomise = "yes";
+            config.startRand.randType = "evenDown";
+            config.endRand.randType = "evenUp";
+            var maxAjdMins = 10;
+            config.startRand.maxAdj = "00:" + maxAjdMins;
+            config.endRand.maxAdj = "00:" + maxAjdMins;
+            ts.init(config);
+            assert.equal(ts.times[0].switches[0].start.getDay(), 0, "Start should be Sun");
+            assert.equal(ts.times[0].switches[0].end.getDay(), 1, "End should be Mon");
+            assert.equal(ts.times[0].switches[0].endSuspended, true, "End should be suspended");
+
+            changeNow(0,19,1);
+            ts.startAction();
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 0, dev1 + " shouldn't have been turned on");
+            assert.equal(ts.getDev(dev1).timesSetTo['off'], 0, dev1 + " shouldn't have been turned off");
+
+            changeNow(1,3,maxAjdMins);
+            ts.endAction(); // Should now be a Mon i.e. a weekday
+            assert.equal(ts.times[0].switches[0].start.getDay(), 1, "Start should be Mon");
+            assert.equal(ts.times[0].switches[0].startSuspended, false, "Start shouldn't be suspended");
+            assert.equal(ts.times[0].switches[0].end.getDay(), 2, "End should be Tue");
+            assert.equal(ts.times[0].switches[0].endSuspended, true, "End suspended until start runs");
+
+            changeNow(0,19,1);
+            ts.startAction();
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1, dev1 + " should have been turned on once");
+            assert.equal(ts.getDev(dev1).timesSetTo['off'], 0, dev1 + " shouldn't have been turned off");
+            assert.equal(ts.times[0].switches[0].endSuspended, false, "End not suspended as start has triggered");
+            changeNow(1,3,maxAjdMins);
+            ts.endAction();
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1, dev1 + " should have been turned on once");
+            assert.equal(ts.getDev(dev1).timesSetTo['off'], 1, dev1 + " should have been turned off once");
         });
 
         it('first timetable entry as randomise, has overall start randomise', function() {
@@ -218,7 +282,7 @@ describe('TabularScheduler', function() {
                 var diffMs = startBeforeRand.getTime()-startAfterRand.getTime();
                 randDiffs.push(diffMs);
                 console.log("diffMs", diffMs);
-                assert(diffMs >=0 && diffMs < maxAdjMins*60*1000, " start time should have gone down between 0 & "
+                assert(diffMs >=0 && diffMs <= maxAdjMins*60*1000, " start time should have gone down between 0 & "
                     + maxAdjMins + " minutes");
                 assert(ts.times[0].active, "Should be active");
             });
@@ -249,12 +313,20 @@ describe('TabularScheduler', function() {
             ts.metrics[['probeType', '=', 'presence'].join(""), 'metrics:mode'] = "home";
         });
 
-        it('triggered weekends and it is a weekday', function () {
+        it('triggered weekend and enabled for weekdays', function () {
             config.timetable[0].days = "Weekdays";
-            now.setHours(19, 1); // At start time for entry 0 in timetable
+            config.timetable[0].endTime = "19:03";
             ts.init(config);
+            now.setHours(19, 1); // Now is Sun.  At start time for entry 0 in timetable
             ts.startAction();
             assert.equal(ts.getDev(dev1).timesSetTo['on'], 0, dev1 + " shouldn't have been turned on as it's a Sunday");
+            now.setMinutes(3);
+            ts.endAction();
+            assert.equal(ts.getDev(dev1).timesSetTo['off'], 0, dev1 + " shouldn't have been turned off as it's a Sunday");
+            var start = ts.times[0].switches[0].start;
+            var end = ts.times[0].switches[0].end;
+            assert.equal(start.getDay(), 1, dev1 + " should have now moved to start on Monday");
+            assert.equal(end.getDay(), 1, dev1 + " should have now moved to end on Monday");
         });
 
     });
@@ -268,7 +340,7 @@ describe('TabularScheduler', function() {
             ts.metrics[['probeType', '=', 'presence'].join(""), 'metrics:mode'] = "home";
         });
 
-        it('start time to none', function () {
+        /*it('start time to none', function () {
             config.timetable[0].startType = "none";
             now.setHours(19, 1);
             ts.init(config);
@@ -279,7 +351,7 @@ describe('TabularScheduler', function() {
             assert(ts.times[0].switches[0].start == null, "Null start time for startType none");
             assert(ts.times[0].switches[0].end == null, "Null end time for endType none");
             ts.startAction();
-        });
+        });TODO: functionality not fully implemented*/
     });
 
     describe('config entries', function() {

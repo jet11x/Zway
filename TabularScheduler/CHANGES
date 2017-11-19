@@ -1,0 +1,4 @@
+0.0.3
+  * Fixed scheduling of randomised and sunrise/sunset entries (zerod seconds, milliseconds)
+  * Removed rescheduled when Presence changes from/to night/home
+  * Tidied up logging output

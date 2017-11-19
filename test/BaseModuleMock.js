@@ -12,7 +12,7 @@ BaseModule = function (id, controller) {
 
     this.meta = {
         "defaults": {
-            "title": "LightTimetable"
+            "title": "TabularSchedular"
         }
     }
     this.config = {};
@@ -20,16 +20,15 @@ BaseModule = function (id, controller) {
 
 BaseModule.prototype.init = function (config) {
     console.log("--- Starting module " + this.meta.defaults.title);
-    /*if (!!config) {
-        this.saveNewConfig(config);
-    } else {
-        this.loadConfig();
-    }*/
     this.config = config;
 };
 
 BaseModule.prototype.stop = function() {
 
+}
+
+BaseModule.prototype.now = function() {
+    return new Date();
 }
 
 BaseModule.prototype.log = function(message) {

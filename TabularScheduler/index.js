@@ -1,6 +1,6 @@
 /*** TabularScheduler Z-Way HA module *******************************************
 
- Version: 0.0.1
+ Version: 0.0.3
  (c) John Talintyre, 2017
  -----------------------------------------------------------------------------
  -----------------------------------------------------------------------------
@@ -40,6 +40,7 @@ TODO: where none for start how deal with day for end?
 
 TODO: complete move to en.json
 TODO: improve description
+TODO: randomized entries don't always move to next day when re-scheduled, make sure day changes?
 
 How start/end are triggered
   Check the times against recorded times in self.times
@@ -63,6 +64,8 @@ TabularScheduler.prototype.init = function (config) {
     };
     self.abbrevs = {"S": "Switches", "D": "Days"};
     self.dayMap = {"Su": 0, "Mo": 1, "Tu": 2, "We": 3, "Th": 4, "Fr": 5, "Sa": 6};
+    self.days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    self.months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     self.logging = {
         "level": self.config.logging.level,
         "what": self.config.logging.what.split(",")
@@ -89,6 +92,7 @@ TabularScheduler.prototype.init = function (config) {
     }
 
     // Create base configuration for timetable entries and their switches
+    var entryNum = 1;
     self.entries = self.config.timetable.reduce(function (memo, entry) {
         var config = (entry.config == undefined || entry.config.trim().length == 0) ? {} : self.parseEntryConfig(entry.config);
         self.logDetail("init", "entryNum="+memo.length);
@@ -112,9 +116,11 @@ TabularScheduler.prototype.init = function (config) {
             }
             return sMemo;
         }, []);
-        memo.push({"config": config, "switches": switches, "entry": entry});
+        memo.push({"config": config, "switches": switches, "entry": entry, "num": entryNum++});
         return memo;
     }, []);
+
+    self.lastPresence = self.getPresenceMode();
 
     self.presenceChange = _.bind(self.presenceChange, self);
     self.startAction = _.bind(self.startAction, self);
@@ -136,6 +142,7 @@ TabularScheduler.prototype.stop = function () {
     var self = this;
 
     self.debug("stop entered");
+    if (!self.entries) return;
     self.removeCronTasks();
 
     // Remove event listeners
@@ -205,7 +212,7 @@ TabularScheduler.prototype.removeCronTasks = function () {
 TabularScheduler.prototype.validStartDay = function(entry, date) {
     var self = this;
     return ("Days" in entry.config) ? _.contains(entry.config.Days, date.getDay())
-        : _.contains(self.dayCheck[entry.days], date.getDay());
+        : _.contains(self.dayCheck[entry.entry.days], date.getDay());
 };
 
 // Call due cron event, event is start or end
@@ -216,27 +223,32 @@ TabularScheduler.prototype.action = function (event) {
     var now = self.now();
     self.logDetail(event, self.times.length + " entries to consider");
     self.times.forEach(function (entry, entryNum) {
-        self.logDetail(event, "entryNum=" + entryNum, "active=" + entry.active, "day=" + now.getDay(),
-            "valid days for this entry=" + self.dayCheck[entry.days]);
+        self.logDetail(event, "#" + (entryNum+1), "active=" + entry.active, "day=" + now.getDay());
         var process = entry.active;
         if (process && event == "start") {
             process = self.validStartDay(entry, now);
-            self.logDetail(event, "Day is valid for entry");
+            if(process) self.logDetail(event, "Day is valid for entry");
         }
         if (process) {
             self.logDetail(event, "Num switches to consider=" + entry.switches.length);
             entry.switches.forEach(function (tSwitch, switchNum) {
                 var recalcForSwitch = false;
-                var processSwitch = tSwitch[event] != null && tSwitch[event] <= now && !tSwitch[event+'Suspended'];
+                var processSwitch = tSwitch[event] != null && tSwitch[event] <= now;
                 processSwitch = (event == "end") ? processSwitch : processSwitch && !tSwitch.triggered;
-                if (processSwitch) {
-                    var mSwitch = tSwitch.metaSwitch;
-                    var aSwitch = mSwitch.aSwitch;
-                    var vDev = self.getVDev(aSwitch, event);
+                self.logDetail(event, "processSwitch="+processSwitch, event+'Suspended='+tSwitch[event+'Suspended'],
+                               "switch time="+self.shortDateTime(tSwitch[event]),
+                               "switch triggered="+tSwitch.triggered,
+                               "tSwitch[event] != null: " + tSwitch[event] != null,
+                               "tSwitch[event] <= now: " + tSwitch[event] <= now);
+                var mSwitch = tSwitch.metaSwitch;
+                var aSwitch = mSwitch.aSwitch;
+                var vDev = self.getVDev(aSwitch, event);
+                if (processSwitch && !tSwitch[event+'Suspended']) {
                     var swRef = "'" + mSwitch[event + "Title"] + "' (" + vDev.id + ")";
                     var swMsg;
                     self.logDetail(event, "switch " + swRef, "triggered=" + tSwitch.triggered,
-                        "startSuspended=" + tSwitch.startSuspended, "start=" + tSwitch.start, "end=" + tSwitch.end);
+                        "startSuspended=" + tSwitch.startSuspended, "start=" + self.shortDateTime(tSwitch.start),
+                        "end=" + self.shortDateTime(tSwitch.end));
                     if (!!vDev) {
                         if (mSwitch.type === 'switchBinary') {
                             var onOff = (event == "start") ? 'on' : 'off';
@@ -251,7 +263,7 @@ TabularScheduler.prototype.action = function (event) {
                         } else {
                             self.error("Don't know how to talk to device type " + mSwitch.type);
                         }
-                        self.logSummary(event, swMsg + " " + swRef);
+                        self.logSummary(event, "#" + (entryNum+1) + " " + swMsg + " " + swRef);
                     }
                     if (event == "start") {
                         tSwitch.triggered = true;
@@ -259,13 +271,15 @@ TabularScheduler.prototype.action = function (event) {
                         recalcForSwitch = tSwitch.end == null;
                     } else {
                         tSwitch.endSuspended = true;
-                        recalcForSwitch = true;
                     }
-                    if (recalcForSwitch) {
-                        entry.switches[switchNum] =
-                            self.calculateScheduleEntry4Switch(self.entries[entryNum], mSwitch);
-                        updateCron = true;
-                    }
+                }
+                if (processSwitch && event == "end") {
+                    recalcForSwitch = true;
+                }
+                if (recalcForSwitch) {
+                    entry.switches[switchNum] =
+                        self.calculateScheduleEntry4Switch(self.entries[entryNum], mSwitch, true);
+                    updateCron = true;
                 }
             });
         }
@@ -279,41 +293,64 @@ TabularScheduler.prototype.action = function (event) {
 TabularScheduler.prototype.presenceChange = function () {
     var self = this;
 
-    self.calculateSchedule();
-    self.removeCronTasks();
-    self.addCronTasks();
+    self.logDetail("scheduling", "presenceChange", "from", self.lastPresence, "to", self.getPresenceMode());
+
+    var newPresence = self.getPresenceMode();
+
+    // Don't care about change to/from night/home
+    if ((self.lastPresence == newPresence ||
+         self.lastPresence == 'home' && newPresence == 'night') ||
+         self.lastPresence == 'night' && newPresence == 'home') {
+    } else {
+
+        self.logDetail("scheduling", "presenceChange about to re-schedule");
+
+        self.calculateSchedule();
+        self.removeCronTasks();
+        self.addCronTasks();
+    }
+    self.lastPresence = newPresence;
 }
 
 TabularScheduler.prototype.calculateSchedule = function () {
     var self = this;
-    self.lastPresence = self.getPresenceMode();
 
     var times = [];
     // Get the schedule information
     self.entries.forEach(function (metaEntry) {
         var entry = metaEntry.entry;
+        var active = entry.presence === "any" || entry.presence === self.lastPresence;
         var entryTimes = {
-            "entry": entry, // TODO: just pick out what we need?
-            "active": entry.presence === "any" || entry.presence === self.lastPresence,
+            "entry": entry,
+            "active": active,
             "days": entry.days,
             "switches": metaEntry.switches.reduce(function (memo, metaSwitch) {
-                return memo.concat(self.calculateScheduleEntry4Switch(metaEntry, metaSwitch));
+                return memo.concat(self.calculateScheduleEntry4Switch(metaEntry, metaSwitch, active));
             }, []),
             "config": metaEntry.config
         };
         times.push(entryTimes);
     });
-    self.logSummary("scheduling", "calculate schedule for " + times.length + " entries");
+    self.logDetail("scheduling", "calculated schedule for " + times.length + " entries");
 
     self.debug("calculateSchedule exiting", "times", times);
 
     return times;
 };
 
-TabularScheduler.prototype.calculateScheduleEntry4Switch = function (metaEntry, metaSwitch) {
+TabularScheduler.prototype.calculateScheduleEntry4Switch = function (metaEntry, metaSwitch, active) {
     var self = this;
     var entry = metaEntry.entry;
-    var switchTime = {"triggered": false, "metaSwitch": metaSwitch};
+    var switchTime = {
+        "triggered": false,
+        "metaSwitch": metaSwitch,
+        "start": null,
+        "end": null
+    };
+
+    if (!active) {
+        return switchTime;
+    }
 
     ["start", "end"].forEach(function (event) {
         switchTime[event] = self.getTime(entry[event + 'Type'], entry[event + 'Time']);
@@ -331,15 +368,22 @@ TabularScheduler.prototype.calculateScheduleEntry4Switch = function (metaEntry, 
                     prevDayStartTime.setHours(prevDayStartTime.getHours()-24);
                     switchTime.endSuspended = !self.validStartDay(metaEntry, prevDayStartTime);
                 } else {
-                    switchTime.endSuspended = true;
+                    switchTime.endSuspended = true; // End suspended until start has run, TODO: why have triggered as well?
                 }
                 self.logDetail("scheduling", "switch " + metaSwitch[event+"Title"], "startSuspended=" + switchTime.startSuspended,
-                    "endSuspended=" + switchTime.endSuspended);
+                    "endSuspended=" + switchTime.endSuspended, "triggered=" + switchTime.triggered);
             }
         }
 
-        self.logDetail("scheduling", event, " scheduled switch '" + metaSwitch[event+"Title"] + "'", "time=" + switchTime[event]);
     });
+
+    if (entry["startType"] != "none") {
+        self.logSummary("scheduling", "#" + metaEntry.num,
+            "scheduled switch '" + metaSwitch["startTitle"] + "'",
+            self.validStartDay(metaEntry, switchTime["start"])
+                ? self.shortDateTime(switchTime["start"]) + "->" + self.shortDateTime(switchTime["end"])
+                : "re-schedule " + self.shortDateTime(switchTime["end"]));
+        }
 
     return switchTime;
 };
@@ -353,6 +397,7 @@ TabularScheduler.prototype.getTime = function (type, timeAdjust) {
     var self = this;
 
     if (type == "none") {
+        self.debug("getTime", "type=none");
         return null;
     }
 
@@ -391,7 +436,7 @@ TabularScheduler.prototype.getTime = function (type, timeAdjust) {
     if (time.getTime() <= now.getTime()) {
         time.setHours(time.getHours() + 24);
         self.debug("getTime moving forward 24 hours to", time);
-        if (type === 'time') { // TODO: really not valid for other types
+        if (type === 'time') { // TODO: really not valid for other types?
             // Correct for DST
             time.setHours(hours, mins);
         }
@@ -421,7 +466,11 @@ TabularScheduler.prototype.randomlyAdjTime = function (type, timeAdjust, baseTim
             self.error("Unknown randomise type " + type);
     }
     self.debug("randomlyAdjTime", type,  "adj="+randAdjMs);
-    return new Date(baseTime.getTime() + randAdjMs);
+    var adjDate = new Date(baseTime.getTime() + randAdjMs);
+    // Zero second and ms as cron granularity is only to minutes
+    adjDate.setSeconds(0);
+    adjDate.setMilliseconds(0);
+    return adjDate
 };
 
 TabularScheduler.prototype.parseEntryConfig = function (config) {
@@ -470,17 +519,28 @@ TabularScheduler.prototype.parseEntryConfig = function (config) {
 
 TabularScheduler.prototype.getSunset = function () {
     var self = this;
-    return self.getDeviceValue([
+    var sunset = self.getDeviceValue([
         ['probeType', '=', 'astronomy_sun_altitude']
     ], 'metrics:sunset');
+    sunset.setSeconds(0,0); // So cron triggered time isn't after this
+    return sunset;
 };
 
 TabularScheduler.prototype.getSunrise = function () {
     var self = this;
-    return self.getDeviceValue([
+    var sunrise = self.getDeviceValue([
         ['probeType', '=', 'astronomy_sun_altitude']
     ], 'metrics:sunrise');
+    sunrise.setSeconds(0,0);
+    return sunrise;
 };
+
+TabularScheduler.prototype.shortDateTime = function(date) {
+    self = this;
+    return self.days[date.getDay()] + " " + date.getDate() + "-" + self.months[date.getMonth()] + " " +
+        ('00'+date.getHours()).slice(-2) + ":" + ('00'+date.getMinutes()).slice(-2) + " " +
+        "TZ:" + date.getTimezoneOffset()/60;
+}
 
 TabularScheduler.prototype.logSummary = function (what) {
     var self = this;

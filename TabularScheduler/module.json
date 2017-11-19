@@ -8,10 +8,10 @@
   ],
   "category": "automation_basic",
   "author": "John Talintyre",
-  "homepage": "",
+  "homepage": "https://github.com/jet11x/Zway/tree/master/TabularScheduler",
   "icon": "icon.png",
   "moduleName": "TabularScheduler",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "maturity": "beta",
   "defaults": {
     "title": "__m_title__",
