@@ -11,7 +11,7 @@
   "homepage": "https://github.com/jet11x/Zway/tree/master/TabularScheduler",
   "icon": "icon.png",
   "moduleName": "TabularScheduler",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "maturity": "beta",
   "defaults": {
     "title": "__m_title__",
@@ -20,28 +20,28 @@
       {
         "presence": "any",
         "days": "All",
-        "startType": "time",
-        "startTime": "00:00",
-        "endType": "time",
-        "endTime": "00:00"
+        "startTime": "15:00",
+        "endTime": "22:00"
       }
     ],
     "helpText": "__help_title__",
+    "activeHours": {
+      "set": true,
+      "startType": "sunsetMinus",
+      "startTime": "00:10",
+      "endType": "sunrisePlus",
+      "endTime": "00:10"
+    },
     "startRand": {
       "maxAdj": "00:10"
     },
     "endRand": {
       "maxAdj": "00:10"
     },
-    "logging": {
-      "level": "summary",
-      "what": [
-        "start",
-        "end",
-        "scheduling",
-        "init"
-      ]
-    }
+    "sensorTrigger": {
+      "timeout": "00:00:05"
+    },
+    "logging": "summary"
   },
   "schema": {
     "type": "object",
@@ -81,35 +81,11 @@
               ],
               "default": "All"
             },
-            "startType": {
-              "type": "string",
-              "title": "__table_start_type_title__",
-              "enum": [
-                "time",
-                "sunsetPlus",
-                "sunsetMinus",
-                "sunrisePlus",
-                "sunriseMinus"
-              ],
-              "default": "time"
-            },
             "startTime": {
               "type": "string",
               "title": "__table_start_time_title__",
               "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
               "default": "00:00"
-            },
-            "endType": {
-              "type": "string",
-              "title": "__table_end_type_title__",
-              "enum": [
-                "time",
-                "sunsetPlus",
-                "sunsetMinus",
-                "sunrisePlus",
-                "sunriseMinus"
-              ],
-              "default": "time"
             },
             "endTime": {
               "type": "string",
@@ -137,12 +113,88 @@
           "showHelp"
         ]
       },
+      "activeHours": {
+        "type": "object",
+        "properties": {
+          "set": {
+            "type": "boolean"
+          },
+          "startType": {
+            "type": "string",
+            "title": "__active_start_type_title__",
+            "enum": [
+              "sunset",
+              "sunsetPlus",
+              "sunsetMinus",
+              "time"
+            ],
+            "dependencies": ["set"]
+          },
+          "startTime": {
+            "type": "string",
+            "title": "__active_start_time__",
+            "dependencies": ["startType"]
+          },
+          "endType": {
+            "type": "string",
+            "title": "__active_end_type_title__",
+            "enum": [
+              "sunrise",
+              "sunrisePlus",
+              "sunriseMinus",
+              "time"
+            ],
+            "dependencies": ["set"]
+          },
+          "endTime": {
+            "type": "string",
+            "title": "__active_end_time__",
+            "dependencies": ["endType"]
+          },
+          "config": {
+            "type": "string",
+            "title": "__active_config_title__",
+            "dependencies": ["set"]
+          }
+        }
+      },
+      "sensorTrigger": {
+        "type": "object",
+        "properties": {
+          "set": {
+            "type": "boolean"
+          },
+          "sensors": {
+            "items": {
+              "datasource": "namespaces",
+              "enum": "namespaces:devices_sensorBinary:deviceId,namespaces:devices_switchBinary:deviceId",
+              "field": "enum"
+            },
+            "type": "array",
+            "uniqueItems": true,
+            "dependencies": [
+              "set"
+            ]
+          },
+          "timeout" : {
+            "title": "__timeout_title__",
+            "type" : "string",
+            "dependencies": [
+              "set"
+            ]
+          },
+          "config": {
+            "type": "string",
+            "title": "__sensors_config_title__"
+          }
+        }
+      },
       "startRand": {
         "type": "object",
         "properties": {
           "randType": {
             "type": "string",
-            "title": "Randomly Move Start Time - affects table entries where Random column is Yes",
+            "title": "Randomly Move Start Time (change to just minutes!!!) - affects table entries where Random column is Yes",
             "enum": [
               "evenUp",
               "evenDown",
@@ -192,8 +244,7 @@
               "type": "string",
               "enum": [
                 "switchBinary",
-                "switchMultilevel",
-                "toggleButton"
+                "switchMultilevel"
               ],
               "required": true
             },
@@ -240,60 +291,19 @@
                   "type": "string"
                 }
               }
-            },
-            "toggleButton": {
-              "type": "object",
-              "dependencies": "filter",
-              "properties": {
-                "startScene": {
-                  "type": "string",
-                  "field": "enum",
-                  "datasource": "namespaces",
-                  "enum": "namespaces:devices_toggleButton:deviceId",
-                  "required": true
-                },
-                "endScene": {
-                  "type": "string",
-                  "field": "enum",
-                  "datasource": "namespaces",
-                  "enum": "namespaces:devices_toggleButton:deviceId"
-                },
-                "ref": {
-                  "type": "string"
-                }
-              }
             }
           }
         }
       },
       "logging": {
         "title": "What should be logged in z-way-server.log (usual location is /var/log)?",
-        "type": "object",
-        "properties": {
-          "level": {
-            "type": "string",
-            "title": "Logging Level",
-            "enum": [
-              "summary",
-              "detailed"
-            ]
-          },
-          "what": {
-            "type": "string",
-            "title": "What should be logged?",
-            "enum": [
-              "start",
-              "end",
-              "scheduling",
-              "init"
-            ]
-          }
-        },
-        "dependencies": {
-          "what": [
-            "level"
-          ]
-        }
+        "type": "string",
+        "title": "Logging Level",
+        "enum": [
+          "summary",
+          "detailed",
+          "veryDetailed"
+        ]
       }
     }
   },
@@ -305,7 +315,6 @@
           "fields": {
             "presence": {
               "type": "select",
-              "removeDefaultNone": true,
               "sort": false,
               "optionLabels": [
                 "Any",
@@ -323,35 +332,12 @@
               ]
             },
             "days": {
-              "type": "select"
-            },
-            "startType": {
               "type": "select",
-              "optionLabels": [
-                "Time",
-                "Sunset+Time",
-                "Sunset-Time",
-                "Sunrise+Time",
-                "Sunrise-Time"
-              ],
-              "removeDefaultNone": true,
-              "sort": false
+              "removeDefaultNone": true
             },
             "startTime": {
               "maskString": "99:99",
               "size": 4
-            },
-            "endType": {
-              "type": "select",
-              "removeDefaultNone": true,
-              "sort": false,
-              "optionLabels": [
-                "Time",
-                "Sunset+Time",
-                "Sunset-Time",
-                "Sunrise+Time",
-                "Sunrise-Time"
-              ]
             },
             "endTime": {
               "type": "text",
@@ -383,6 +369,91 @@
           "__help_config_examples__"
         ]
       },
+      "activeHours": {
+        "fields": {
+          "set": {
+            "type": "checkbox",
+            "rightLabel": "__active_hours_title__"
+          },
+          "startType": {
+            "type": "select",
+            "optionLabels": [
+              "Sunset",
+              "Sunset+Time",
+              "Sunset-Time",
+              "Time"
+            ],
+            "removeDefaultNone": true,
+            "sort": false,
+            "dependencies": {
+              "set": true
+            }
+          },
+          "startTime": {
+            "type": "time",
+            "dateFormat": "HH:mm",
+            "dependencies": {
+              "startType": ["sunsetPlus", "sunsetMinus", "time"]
+            }
+          },
+          "endType": {
+            "type": "select",
+            "optionLabels": [
+              "Sunrise",
+              "Sunrise+Time",
+              "Sunrise-Time",
+              "Time"
+            ],
+            "removeDefaultNone": true,
+            "sort": false,
+            "dependencies": {
+              "set": true
+            }
+          },
+          "endTime": {
+            "type": "time",
+            "dateFormat": "HH:mm",
+            "dependencies": {
+              "endType": ["sunrisePlus", "sunriseMinus", "time"]
+            }
+          },
+          "config": {
+            "type": "text",
+            "size": 20,
+            "dependencies": {
+              "set": true
+            }
+          }
+        }
+      },
+      "sensorTrigger": {
+        "fields": {
+          "set": {
+            "type": "checkbox",
+            "rightLabel": "Sensors can trigger lights"
+          },
+          "sensors" : {
+            "fields": {
+              "item": {
+                "datasource": "namespaces",
+                "field": "devices",
+                "optionLabels": "namespaces:devices_sensorBinary:deviceName,namespaces:devices_switchBinary:deviceName",
+                "type": "select"
+              }
+            },
+            "label": "__sensors_label__"
+          },
+          "timeout" : {
+            "type": "time",
+            "dateFormat": "HH:mm:ss",
+            "helper": "__sensor_timeout__"
+          },
+          "config": {
+            "type": "text",
+            "size": 20
+          }
+        }
+      },
       "startRand": {
         "fields": {
           "randType": {
@@ -394,6 +465,8 @@
             ]
           },
           "maxAdj": {
+            "type": "time",
+            "dateFormat": "HH:mm",
             "helper": "__rand_maxAdj__"
           }
         }
@@ -424,8 +497,7 @@
               "label": "__l_filter__",
               "optionLabels": [
                 "__switchBinary__",
-                "__switchMultilevel__",
-                "__toggleButton__"
+                "__switchMultilevel__"
               ]
             },
             "switchBinary": {
@@ -473,54 +545,19 @@
                   "helper": "Optional reference that can be used in <b>Config</b> column of table of schedule entries"
                 }
               }
-            },
-            "toggleButton": {
-              "dependencies": {
-                "filter": "toggleButton"
-              },
-              "fields": {
-                "startScene": {
-                  "type": "select",
-                  "removeDefaultNone": false,
-                  "noneLabel": "__l_choose_dev__",
-                  "label": "__l_startScene__",
-                  "datasource": "namespaces",
-                  "field": "optionLabels",
-                  "optionLabels": "namespaces:devices_toggleButton:deviceName"
-                },
-                "endScene": {
-                  "type": "select",
-                  "removeDefaultNone": false,
-                  "noneLabel": "__l_choose_dev__",
-                  "label": "__l_endScene__",
-                  "datasource": "namespaces",
-                  "field": "optionLabels",
-                  "optionLabels": "namespaces:devices_toggleButton:deviceName"
-                },
-                "ref": {
-                  "type": "text",
-                  "helper": "Optional reference that can be used in <b>Config</b> column of table of schedule entries"
-                }
-              }
             }
           }
         }
       },
       "logging": {
-        "fields": {
-          "level": {
-            "type": "select",
-            "noneLabel": "Nothing",
-            "optionLabels": [
-              "Summary",
-              "Detailed"
-            ]
-          },
-          "what": {
-            "type": "checkbox",
-            "multiple": true
-          }
-        }
+        "type": "select",
+        "noneLabel": "Nothing",
+        "sort": false,
+        "optionLabels": [
+          "1 Summary",
+          "2 Detailed",
+          "3 Very Detailed"
+        ]
       }
     }
   }

@@ -12,7 +12,7 @@ BaseModule = function (id, controller) {
 
     this.meta = {
         "defaults": {
-            "title": "TabularSchedular"
+            "title": "moduleName"
         }
     }
     this.config = {};
@@ -59,4 +59,43 @@ BaseModule.prototype.getPresenceMode = function() {
     }
 
     return value;
+};
+
+BaseModule.prototype.processDeviceList = function(devices,callback) {
+    var self = this;
+    if (! _.isFunction(callback)) {
+        self.error('Invalid callback for processDeviceList');
+        return;
+    }
+
+    if (_.isUndefined(devices) === 'undefined') {
+        return;
+    } else if (! _.isArray(devices)) {
+        devices = [ devices ];
+    }
+
+    _.each(devices,function(device) {
+        var vDev;
+        if (_.isString(device)) {
+            vDev = self.controller.devices.get(device);
+
+        } else if (_.isObject(device)) {
+            vDev = device;
+        }
+        if (_.isNull(vDev) || _.isUndefined(vDev)) {
+            self.error('Device not found '+device);
+            return;
+        }
+        callback(vDev);
+    });
+};
+
+
+// From Automation Module
+BaseModule.prototype.getName = function() {
+    return /(\w+)\(/.exec(this.constructor.toString())[1];
+};
+
+BaseModule.prototype.addNotification = function (severity, message, type) {
+    this.controller.addNotification(severity, message, type, this.getName());
 };

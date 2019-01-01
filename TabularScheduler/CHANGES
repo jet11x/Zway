@@ -1,3 +1,8 @@
+0.0.5 15-Dec-18
+  * An almost total re-write
+  * Define active hours - lights don't go on outside this
+  * Support for security sensors turning on lights
+
 0.0.4 19-Nov-17
   * Correctly zeroing secs, millisecs for sunrise/sunset
 
