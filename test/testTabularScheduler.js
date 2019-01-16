@@ -323,6 +323,7 @@ describe('TabularScheduler', function() {
             clock.moveTo(18, 5);
             assert.equal(ts.getDev(dev1).timesSetTo["on"], 2, dev1 + " should have been turned on twice");
             */
+            //@@@
         });
     });
 

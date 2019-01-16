@@ -1,9 +1,8 @@
 {
   "singleton": false,
   "dependencies": [
-    "Cron",
-    "Presence",
     "BaseModule",
+    "Presence",
     "Astronomy"
   ],
   "category": "automation_basic",
@@ -19,28 +18,25 @@
     "timetable": [
       {
         "presence": "any",
-        "days": "All",
-        "startTime": "15:00",
-        "endTime": "22:00"
+        "startTime": "12:00",
+        "endTime": "23:00"
       }
     ],
-    "helpText": "__help_title__",
+    "help": {
+      "helpText": "__help_title__"
+    },
     "activeHours": {
       "set": true,
-      "startType": "sunsetMinus",
-      "startTime": "00:10",
-      "endType": "sunrisePlus",
-      "endTime": "00:10"
+      "startType": "sunsetPlus",
+      "startTime": "00:05",
+      "endType": "sunriseMinus",
+      "endTime": "00:05"
     },
-    "startRand": {
-      "maxAdj": "00:10"
-    },
-    "endRand": {
-      "maxAdj": "00:10"
-    },
+    "maxRand": 10,
     "sensorTrigger": {
-      "timeout": "00:00:05"
+      "timeout": "5"
     },
+    "pollInterval": 60,
     "logging": "summary"
   },
   "schema": {
@@ -74,44 +70,52 @@
             "days": {
               "title": "__table_days_title__",
               "type": "string",
-              "enum": [
-                "All",
-                "Weekends",
-                "Weekdays"
-              ],
-              "default": "All"
+              "default": "0,1,2,3,4,5,6",
+              "enum": ["0,1,2,3,4,5,6","1,2,3,4,5","0,6","6", "0", "1", "2", "3", "4", "5"]
             },
             "startTime": {
               "type": "string",
               "title": "__table_start_time_title__",
               "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
-              "default": "00:00"
+              "default": "12:00"
             },
             "endTime": {
               "type": "string",
               "title": "__table_end_time_title__",
               "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
-              "default": "00:00"
+              "default": "23:00"
             },
-            "config": {
+            "device": {
               "type": "string",
-              "title": "__table_config_title__"
+              "title": "__table_light_title__",
+              "field": "enum",
+              "datasource": "namespaces",
+              "enum": "namespaces:devices_switchBinary:deviceId"
             }
           }
         }
       },
-      "showHelp": {
-        "type": "string",
-        "enum": [
-          "Showing help"
-        ]
+      "maxRand": {
+        "type": "integer",
+        "title": "__max_rand_title__"
       },
-      "helpText": {
-        "type": "string",
-        "readonly": true,
-        "dependencies": [
-          "showHelp"
-        ]
+      "help": {
+        "type": "object",
+        "properties": {
+          "showHelp": {
+            "type": "string",
+            "enum": [
+              "showHelp"
+            ]
+          },
+          "helpText": {
+            "type": "string",
+            "readonly": true,
+            "dependencies": [
+              "showHelp"
+            ]
+          }
+        }
       },
       "activeHours": {
         "type": "object",
@@ -128,12 +132,16 @@
               "sunsetMinus",
               "time"
             ],
-            "dependencies": ["set"]
+            "dependencies": [
+              "set"
+            ]
           },
           "startTime": {
             "type": "string",
             "title": "__active_start_time__",
-            "dependencies": ["startType"]
+            "dependencies": [
+              "startType"
+            ]
           },
           "endType": {
             "type": "string",
@@ -144,17 +152,16 @@
               "sunriseMinus",
               "time"
             ],
-            "dependencies": ["set"]
+            "dependencies": [
+              "set"
+            ]
           },
           "endTime": {
             "type": "string",
             "title": "__active_end_time__",
-            "dependencies": ["endType"]
-          },
-          "config": {
-            "type": "string",
-            "title": "__active_config_title__",
-            "dependencies": ["set"]
+            "dependencies": [
+              "endType"
+            ]
           }
         }
       },
@@ -176,129 +183,36 @@
               "set"
             ]
           },
-          "timeout" : {
-            "title": "__timeout_title__",
-            "type" : "string",
+          "timeout": {
+            "title": "__sensor_timeout_title__",
+            "type": "number",
+            "minimum": 0.01,
             "dependencies": [
               "set"
             ]
           },
-          "config": {
-            "type": "string",
-            "title": "__sensors_config_title__"
-          }
-        }
-      },
-      "startRand": {
-        "type": "object",
-        "properties": {
-          "randType": {
-            "type": "string",
-            "title": "Randomly Move Start Time (change to just minutes!!!) - affects table entries where Random column is Yes",
-            "enum": [
-              "evenUp",
-              "evenDown",
-              "evenUpDown"
-            ]
-          },
-          "maxAdj": {
-            "type": "string",
-            "pattern": "^(0[0-9]:[0-5][0-9]$"
-          }
-        },
-        "dependencies": {
-          "maxAdj": [
-            "randType"
-          ]
-        }
-      },
-      "endRand": {
-        "type": "object",
-        "properties": {
-          "randType": {
-            "type": "string",
-            "title": "Randomly Move End Time - affects table entries where Random column is Yes",
-            "enum": [
-              "evenUp",
-              "evenDown",
-              "evenUpDown"
-            ]
-          },
-          "maxAdj": {
-            "type": "string",
-            "pattern": "^(0[0-9]:[0-5][0-9]$"
-          }
-        },
-        "dependencies": {
-          "maxAdj": [
-            "randType"
-          ]
-        }
-      },
-      "switches": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "filter": {
-              "type": "string",
-              "enum": [
-                "switchBinary",
-                "switchMultilevel"
-              ],
-              "required": true
+          "switches": {
+            "items": {
+              "datasource": "namespaces",
+              "enum": "namespaces:devices_switchBinary:deviceId",
+              "field": "enum"
             },
-            "switchBinary": {
-              "type": "object",
-              "dependencies": "filter",
-              "properties": {
-                "device": {
-                  "type": "string",
-                  "field": "enum",
-                  "datasource": "namespaces",
-                  "enum": "namespaces:devices_switchBinary:deviceId",
-                  "required": true
-                },
-                "ref": {
-                  "type": "string"
-                }
-              }
-            },
-            "switchMultilevel": {
-              "type": "object",
-              "dependencies": "filter",
-              "properties": {
-                "device": {
-                  "datasource": "namespaces",
-                  "enum": "namespaces:devices_switchMultilevel:deviceId,namespaces:devices_switchRGBW:deviceId",
-                  "field": "enum",
-                  "required": true,
-                  "type": "string"
-                },
-                "startLevel": {
-                  "maximum": "99",
-                  "minimum": "0",
-                  "required": true,
-                  "type": "integer"
-                },
-                "endLevel": {
-                  "maximum": "99",
-                  "minimum": "0",
-                  "required": true,
-                  "type": "integer"
-                },
-                "ref": {
-                  "type": "string"
-                }
-              }
-            }
+            "type": "array",
+            "uniqueItems": true,
+            "dependencies": [
+              "set"
+            ]
           }
         }
+      },
+      "pollInterval": {
+        "type": "integer",
+        "minimum": 1,
+        "title": "__poll_interval_title__"
       },
       "logging": {
-        "title": "What should be logged in z-way-server.log (usual location is /var/log)?",
+        "title": "__logging_title__",
         "type": "string",
-        "title": "Logging Level",
         "enum": [
           "summary",
           "detailed",
@@ -316,11 +230,12 @@
             "presence": {
               "type": "select",
               "sort": false,
+              "noneLabel": "__presence_none__",
               "optionLabels": [
-                "Any",
-                "Home",
-                "Away",
-                "Vacation"
+                "__presence_any__",
+                "__presence_home__",
+                "__presence_away__",
+                "__presence_vacation__"
               ]
             },
             "randomise": {
@@ -333,9 +248,24 @@
             },
             "days": {
               "type": "select",
-              "removeDefaultNone": true
+              "removeDefaultNone": true,
+              "multiple": true,
+              "size": 1,
+              "sort": false,
+              "optionLabels": [
+                "__days_all__",
+                "__days_weekdays__",
+                "__days_weekends__",
+                "__days_sat__",
+                "__days_sun__",
+                "__days_mon__",
+                "__days_tue__",
+                "__days_wed__",
+                "__days_thu__",
+                "__days_fri__"]
             },
             "startTime": {
+              "type": "text",
               "maskString": "99:99",
               "size": 4
             },
@@ -344,30 +274,36 @@
               "maskString": "99:99",
               "size": 4
             },
-            "config": {
-              "type": "text",
-              "size": 8
+            "device": {
+              "type": "select",
+              "removeDefaultNone": false,
+              "noneLabel": "__l_choose_dev__",
+              "datasource": "namespaces",
+              "field": "optionLabels",
+              "optionLabels": "namespaces:devices_switchBinary:deviceName"
             }
           }
         }
       },
-      "showHelp": {
-        "type": "select",
-        "noneLabel": "Not showing help"
-      },
-      "helpText": {
-        "type": "text",
-        "helpers": [
-          "__help_presence__",
-          "__help_random__",
-          "__help_days__",
-          "__help_start_type__",
-          "__help_start_time__",
-          "__help_end_type__",
-          "__help_end_time__",
-          "__help_config__",
-          "__help_config_examples__"
-        ]
+      "help": {
+        "fields": {
+          "showHelp": {
+            "type": "select",
+            "optionLabels": ["__help_show__"],
+            "noneLabel": "__help_not_showing__"
+          },
+          "helpText": {
+            "type": "text",
+            "helpers": [
+              "__help_presence__",
+              "__help_random__",
+              "__help_days__",
+              "__help_start_time__",
+              "__help_end_time__",
+              "__help_light__"
+            ]
+          }
+        }
       },
       "activeHours": {
         "fields": {
@@ -378,10 +314,10 @@
           "startType": {
             "type": "select",
             "optionLabels": [
-              "Sunset",
-              "Sunset+Time",
-              "Sunset-Time",
-              "Time"
+              "__active_sunset__",
+              "__active_sunset__+__active_time__",
+              "__active_sunset__-__active_time__",
+              "__active_time__"
             ],
             "removeDefaultNone": true,
             "sort": false,
@@ -393,16 +329,20 @@
             "type": "time",
             "dateFormat": "HH:mm",
             "dependencies": {
-              "startType": ["sunsetPlus", "sunsetMinus", "time"]
+              "startType": [
+                "sunsetPlus",
+                "sunsetMinus",
+                "time"
+              ]
             }
           },
           "endType": {
             "type": "select",
             "optionLabels": [
-              "Sunrise",
-              "Sunrise+Time",
-              "Sunrise-Time",
-              "Time"
+              "__active_sunrise__",
+              "__active_sunrise__+__active_time__",
+              "__active_sunrise__-__active_time__",
+              "__active_time__"
             ],
             "removeDefaultNone": true,
             "sort": false,
@@ -414,14 +354,11 @@
             "type": "time",
             "dateFormat": "HH:mm",
             "dependencies": {
-              "endType": ["sunrisePlus", "sunriseMinus", "time"]
-            }
-          },
-          "config": {
-            "type": "text",
-            "size": 20,
-            "dependencies": {
-              "set": true
+              "endType": [
+                "sunrisePlus",
+                "sunriseMinus",
+                "time"
+              ]
             }
           }
         }
@@ -430,9 +367,9 @@
         "fields": {
           "set": {
             "type": "checkbox",
-            "rightLabel": "Sensors can trigger lights"
+            "rightLabel": "__sensor_use__"
           },
-          "sensors" : {
+          "sensors": {
             "fields": {
               "item": {
                 "datasource": "namespaces",
@@ -441,111 +378,21 @@
                 "type": "select"
               }
             },
-            "label": "__sensors_label__"
+            "label": "__sensor_sensors__"
           },
-          "timeout" : {
-            "type": "time",
-            "dateFormat": "HH:mm:ss",
+          "timeout": {
             "helper": "__sensor_timeout__"
           },
-          "config": {
-            "type": "text",
-            "size": 20
-          }
-        }
-      },
-      "startRand": {
-        "fields": {
-          "randType": {
-            "type": "select",
-            "optionLabels": [
-              "Even Up (increase time by evenly spread random number of hours/mins up to specified max HH:mm)",
-              "Even Down (decrease time by evenly spread random number of hours/mins up to specified max HH:mm)",
-              "Even Up & Down (increase/decrease time by evenly spread random number between -HH:mm/2 and +HH:mm/2"
-            ]
-          },
-          "maxAdj": {
-            "type": "time",
-            "dateFormat": "HH:mm",
-            "helper": "__rand_maxAdj__"
-          }
-        }
-      },
-      "endRand": {
-        "fields": {
-          "randType": {
-            "type": "select",
-            "optionLabels": [
-              "Even Up (increase time by evenly spread random number of hours/mins up to specified max HH:mm)",
-              "Even Down (decrease time by evenly spread random number of hours/mins up to specified max HH:mm)",
-              "Even Up & Down (increase/decrease time by evenly spread random number between -HH:mm/2 and +HH:mm/2"
-            ]
-          },
-          "maxAdj": {
-            "helper": "__rand_maxAdj__"
-          }
-        }
-      },
-      "switches": {
-        "label": "__l_switches__",
-        "items": {
-          "fields": {
-            "filter": {
-              "type": "select",
-              "removeDefaultNone": false,
-              "noneLabel": "__l_choose_type__",
-              "label": "__l_filter__",
-              "optionLabels": [
-                "__switchBinary__",
-                "__switchMultilevel__"
-              ]
-            },
-            "switchBinary": {
-              "dependencies": {
-                "filter": "switchBinary"
-              },
-              "fields": {
-                "device": {
-                  "type": "select",
-                  "removeDefaultNone": false,
-                  "noneLabel": "__l_choose_dev__",
-                  "datasource": "namespaces",
-                  "field": "optionLabels",
-                  "optionLabels": "namespaces:devices_switchBinary:deviceName"
-                },
-                "ref": {
-                  "type": "text",
-                  "helper": "Optional reference that can be used in <b>Config</b> column of table of schedule entries"
-                }
+          "switches": {
+            "fields": {
+              "item": {
+                "datasource": "namespaces",
+                "field": "devices",
+                "optionLabels": "namespaces:devices_switchBinary:deviceName",
+                "type": "select"
               }
             },
-            "switchMultilevel": {
-              "dependencies": {
-                "filter": "switchMultilevel"
-              },
-              "fields": {
-                "device": {
-                  "datasource": "namespaces",
-                  "field": "optionLabels",
-                  "noneLabel": "__l_choose_dev__",
-                  "optionLabels": "namespaces:devices_switchMultilevel:deviceName,namespaces:devices_switchRGBW:deviceName",
-                  "removeDefaultNone": false,
-                  "type": "select"
-                },
-                "startLevel": {
-                  "type": "integer",
-                  "helper": "Level to set to at start"
-                },
-                "endLevel": {
-                  "type": "integer",
-                  "helper": "Level to set to at end"
-                },
-                "ref": {
-                  "type": "text",
-                  "helper": "Optional reference that can be used in <b>Config</b> column of table of schedule entries"
-                }
-              }
-            }
+            "label": "__sensor_lights__"
           }
         }
       },
@@ -554,9 +401,9 @@
         "noneLabel": "Nothing",
         "sort": false,
         "optionLabels": [
-          "1 Summary",
-          "2 Detailed",
-          "3 Very Detailed"
+          "__logging_summary__",
+          "__logging_detailed__",
+          "__logging_very_detailed__"
         ]
       }
     }
