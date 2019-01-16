@@ -1,0 +1,48 @@
+{
+  "singleton": false,
+  "dependencies": [
+    "BaseModule"
+  ],
+  "category": "automation_basic",
+  "author": "John Talintyre",
+  "homepage": "https://github.com/jet11x/Zway/tree/master/MultiToBinary",
+  "icon": "icon.png",
+  "moduleName": "MultiToBinary",
+  "version": "0.0.1",
+  "maturity": "beta",
+  "defaults": {
+    "title": "__m_title__",
+    "description": "__m_descr__",
+    "onLevel": 99
+  },
+  "schema": {
+    "type": "object",
+    "properties": {
+      "device": {
+        "type": "string",
+        "title": "__device__",
+        "field": "enum",
+        "datasource": "namespaces",
+        "enum": "namespaces:devices_switchMultilevel:deviceId"
+      },
+      "onLevel": {
+        "minimum": 1,
+        "title": "__on_level__",
+        "type": "integer",
+        "maximum": 99
+      }
+    }
+  },
+  "options": {
+    "fields": {
+      "device": {
+        "type": "select",
+        "removeDefaultNone": true,
+        "noneLabel": "__l_choose_dev__",
+        "datasource": "namespaces",
+        "field": "optionLabels",
+        "optionLabels": "namespaces:devices_switchMultilevel:deviceName"
+      }
+    }
+  }
+}

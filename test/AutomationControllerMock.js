@@ -214,21 +214,28 @@ function VirtualDev(id, title, type) {
     this.performCommand = function(action, args) {
         var self = this;
 
+        var onOff = action;
         debug("VirtualDev.performCommand.  id=" + id + " State " + this.state + "->" + action);
         if (action === 'exact') {
             if (typeof(args) === "object" && "level" in args) {
-                action = args.level === 0 ? 'off' : 'on';
+                onOff = args.level === 0 ? 'off' : 'on';
             }
         }
-        self.state = action;
-        self.lastAction = action;
-        self.timesSetTo[action] = (self.timesSetTo[action] || 0) + 1;
-        if (action === 'on') {
-            self.metrics["metrics:level"] = "on"; // TODO: need to support dimmer too
-        } else if (action === 'off') {
-            self.metrics["metrics:level"] = "off";
+        self.state = onOff;
+        self.lastAction = onOff;
+        self.timesSetTo[onOff] = (self.timesSetTo[onOff] || 0) + 1;
+        if (_.has(self, 'handler')) {
+            self.handler(action, args);
         } else {
-            console.error("Oops don't know action " + action);
+            if (action === 'on') {
+                self.metrics["metrics:level"] = "on"; // TODO: need to support dimmer too
+            } else if (action === 'off') {
+                self.metrics["metrics:level"] = "off";
+            } else if (action === 'exact') {
+                self.metrics["metrics:level"] = args.level;
+            } else {
+                console.error("Oops don't know action " + action);
+            }
         }
         //if (!!self.callbacks) self.callbacks.forEach(function(callback) {callback(self);});
         Object.keys(self.callbacks).forEach(function(key) {self.callbacks[key](self);});
@@ -239,7 +246,7 @@ function VirtualDev(id, title, type) {
         this.state = "off";
         this.lastAction = "";
         this.metrics["metrics:title"] = this.origTitle;
-        this.metrics["metrics:level"] = type === "switchBinary" ? "off" : {"level" : 0};
+        this.metrics["metrics:level"] = type === "switchBinary" ? "off" : 0;
     }
 
     this.reset();

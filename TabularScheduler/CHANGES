@@ -1,3 +1,7 @@
+0.0.6 Jan-18
+  * Switched to just supporting binary devices (lights can be selected via drop down rather than typing a name)
+  * Switched from cron to setInterval to simplify the code
+
 0.0.5 15-Dec-18
   * An almost total re-write
   * Define active hours - lights don't go on outside this

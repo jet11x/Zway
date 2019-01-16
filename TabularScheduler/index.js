@@ -234,7 +234,7 @@ TabularScheduler.prototype.rerunableInit = function(firstRun) {
     self.callbackPresence = _.bind(self.handlePresence, self);
     self.callbackStart = _.bind(self.handleStart, self);
     self.callbackEnd = _.bind(self.handleEnd, self);
-    self.callbackActiveHoursEnd = _.bind(self.handleActiveHours, self);
+    self.callbackActiveHours = _.bind(self.handleActiveHours, self);
     self.callbackSensor = _.bind(self.handleSensor,self);
     self.callbackLight = _.bind(self.handleLight, self);
 

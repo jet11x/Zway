@@ -1,0 +1,8 @@
+{
+  "device": "Choose a Multilevel Device/Dimmer",
+  "m_title": "Multilevel To Binary",
+  "m_descr": "Present a multilevel device (a dimmer) as a binary device.  Useful with Tabular Scheduler",
+  "on_level": "Level to set multilevel device/dimmer to when turning on",
+  "switchBinary":"Binary Switch",
+  "switchMultilevel":"Multilevel/RGB Switch"
+}
