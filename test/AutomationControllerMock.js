@@ -54,8 +54,8 @@ AutomationController.prototype.unhide = function() {
     this.devices.unhide();
 }
 
-AutomationController.prototype.add = function(id, title) {
-    return this.devices.add(id, title);
+AutomationController.prototype.add = function(id, title, type) {
+    return this.devices.add(id, title, type);
 }
 
 AutomationController.prototype.addNotification = function() {
@@ -252,6 +252,7 @@ function VirtualDev(id, title, type) {
     this.reset();
 
     this.get = function(what) {
+        if (what === 'deviceType') return this.type;
         return (what in this.metrics) ? this.metrics[what] : "";
     };
 

@@ -1,3 +1,8 @@
+0.1.0 20-Jan-18
+  * Specify on level for multilevel lights
+  * Polling intervals to select
+  * Various small improvements
+
 0.0.6 16-Jan-18
   * Switched to just supporting binary devices (lights can be selected via drop down rather than typing a name)
   * Switched from cron to setInterval to simplify the code

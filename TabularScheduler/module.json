@@ -10,7 +10,7 @@
   "homepage": "https://github.com/jet11x/Zway/tree/master/TabularScheduler",
   "icon": "icon.png",
   "moduleName": "TabularScheduler",
-  "version": "0.0.5",
+  "version": "0.1.0",
   "maturity": "beta",
   "defaults": {
     "title": "__m_title__",
@@ -23,7 +23,7 @@
       }
     ],
     "help": {
-      "helpText": "__help_title__"
+       "helpText": "__help_title__"
     },
     "activeHours": {
       "set": true,
@@ -33,10 +33,11 @@
       "endTime": "00:05"
     },
     "maxRand": 10,
+    "onLevel": 70,
     "sensorTrigger": {
       "timeout": "5"
     },
-    "pollInterval": 60,
+    "pollInterval": "60",
     "logging": "summary"
   },
   "schema": {
@@ -76,13 +77,13 @@
             "startTime": {
               "type": "string",
               "title": "__table_start_time_title__",
-              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$",
               "default": "12:00"
             },
             "endTime": {
               "type": "string",
               "title": "__table_end_time_title__",
-              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$",
               "default": "23:00"
             },
             "device": {
@@ -90,14 +91,10 @@
               "title": "__table_light_title__",
               "field": "enum",
               "datasource": "namespaces",
-              "enum": "namespaces:devices_switchBinary:deviceId"
+              "enum": "namespaces:devices_switchBinary:deviceId,namespaces:devices_switchMultilevel:deviceId"
             }
           }
         }
-      },
-      "maxRand": {
-        "type": "integer",
-        "title": "__max_rand_title__"
       },
       "help": {
         "type": "object",
@@ -116,6 +113,16 @@
             ]
           }
         }
+      },
+      "maxRand": {
+        "type": "integer",
+        "title": "__max_rand_title__"
+      },
+      "onLevel": {
+        "type": "integer",
+        "title": "__on_level__",
+        "minimum": 1,
+        "maximum": 99
       },
       "activeHours": {
         "type": "object",
@@ -174,7 +181,7 @@
           "sensors": {
             "items": {
               "datasource": "namespaces",
-              "enum": "namespaces:devices_sensorBinary:deviceId,namespaces:devices_switchBinary:deviceId",
+              "enum": "namespaces:devices_sensorBinary:deviceId",
               "field": "enum"
             },
             "type": "array",
@@ -194,7 +201,7 @@
           "switches": {
             "items": {
               "datasource": "namespaces",
-              "enum": "namespaces:devices_switchBinary:deviceId",
+              "enum": "namespaces:devices_switchBinary:deviceId,namespaces:devices_switchMultilevel:deviceId",
               "field": "enum"
             },
             "type": "array",
@@ -206,8 +213,8 @@
         }
       },
       "pollInterval": {
-        "type": "integer",
-        "minimum": 1,
+        "type": "select",
+        "enum": ["60","30","15","10","5","1"],
         "title": "__poll_interval_title__"
       },
       "logging": {
@@ -280,7 +287,7 @@
               "noneLabel": "__l_choose_dev__",
               "datasource": "namespaces",
               "field": "optionLabels",
-              "optionLabels": "namespaces:devices_switchBinary:deviceName"
+              "optionLabels": "namespaces:devices_switchBinary:deviceName,namespaces:devices_switchMultilevel:deviceName"
             }
           }
         }
@@ -293,13 +300,13 @@
             "noneLabel": "__help_not_showing__"
           },
           "helpText": {
-            "type": "text",
             "helpers": [
               "__help_presence__",
               "__help_random__",
               "__help_days__",
               "__help_start_time__",
               "__help_end_time__",
+              "__help_time__",
               "__help_light__"
             ]
           }
@@ -374,7 +381,7 @@
               "item": {
                 "datasource": "namespaces",
                 "field": "devices",
-                "optionLabels": "namespaces:devices_sensorBinary:deviceName,namespaces:devices_switchBinary:deviceName",
+                "optionLabels": "namespaces:devices_sensorBinary:deviceName",
                 "type": "select"
               }
             },
@@ -388,13 +395,20 @@
               "item": {
                 "datasource": "namespaces",
                 "field": "devices",
-                "optionLabels": "namespaces:devices_switchBinary:deviceName",
+                "optionLabels": "namespaces:devices_switchBinary:deviceName,namespaces:devices_switchMultilevel:deviceName",
                 "type": "select"
               }
             },
             "label": "__sensor_lights__"
           }
         }
+      },
+      "pollInterval": {
+         "removeDefaultNone": true,
+         "helpers": [
+           "__poll_interval_helper1__",
+           "__poll_interval_helper2__"
+         ]
       },
       "logging": {
         "type": "select",

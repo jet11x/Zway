@@ -7,17 +7,35 @@ var logging = "summary"; // summary, detailed or veryDetailed
 leftPad = require('left-pad');
 var _ = require('underscore');
 
+/*
+TODO:
+  - ensure timeouts/intervals are cleared down
+  - not sure sensor correctly controls lights if none listed under sensor, add test for this.
+     - presence shouldn't matter for sensor?
+ */
+
 // Mocha tests using chai assert
 describe('TabularScheduler', function() {
     var baseNow = new Date(2017, 9, 8, 9, 1); // Sunday, BST
-    var sunset = new Date(baseNow);
-    sunset.setHours(19,0,2,3);
+
+    var setSunset = function(hours, min, sec, ms) {
+        var sunset = clock.getDate();
+        sunset.setHours(hours,min,sec,ms);
+        ts.metrics[['probeType','=','astronomy_sun_altitude'].join(""),'metrics:sunset'] = sunset;
+    };
+
+    var setSunrise = function(hours, min, sec, ms) {
+        var sunrise = clock.getDate();
+        sunrise.setHours(hours,min,sec,ms);
+        ts.metrics[['probeType','=','astronomy_sun_altitude'].join(""),'metrics:sunrise'] = sunrise;
+    };
 
     beforeEach(function () {
         clock.setDateAndReset(baseNow);
         config = baseConfig();
         ts.metrics[['probeType','=','presence'].join(""),'metrics:mode'] = "home";
-        ts.metrics[['probeType','=','astronomy_sun_altitude'].join(""),'metrics:sunset'] = sunset;
+        setSunrise(6, 59, 59, 3);
+        setSunset(19, 0, 2, 3);
         //console.log("\n");
     });
 
@@ -31,7 +49,7 @@ describe('TabularScheduler', function() {
     var executeFile = require('../modules/executeFile');
 
     this.debugPrint = function(str) {
-        console.log(clock.formatedDateTime() + " " + str);
+        console.log(clock.formatedDateTime(true) + " " + str);
     }
 
     dgbPrint = function() {
@@ -89,16 +107,19 @@ describe('TabularScheduler', function() {
 
     this.TabularScheduler.prototype.log = function(message) {
         self = this;
-        console.log(clock.getHRDateformat(self.now()) + " " + message);
+        //console.log(clock.getHRDateformat(self.now()) + " " + message);
+        console.log(clock.getDateFormat(self.now(), true) + " " + message);
     };
 
     var ts = new this.TabularScheduler(1, controller);
     ts.meta.defaults.title = "TabularScheduler";
     ts.langFile = {m_title:"TabularScheduler"};
+    ts.getInstanceTitle = function() {return "TabularScheduler"};
     var fmt = new this.TabularFormat();
 
     var printf = function() {
-        console.log(clock.getHRDateformat(clock.getDate()) + ' ... ' + fmt.format.apply(fmt, arguments));
+        //console.log(clock.getHRDateformat(clock.getDate()) + ' ... ' + fmt.format.apply(fmt, arguments));
+        console.log(clock.getDateFormat(clock.getDate(), true) + ' ... ' + fmt.format.apply(fmt, arguments));
     };
 
     var dev1 = "ZWayVDev_zway_15-0-37";
@@ -109,37 +130,6 @@ describe('TabularScheduler', function() {
     var vDev3 = controller.add(dev3, "Bedroom Light", "switchMultilevel");
     var sens1 = "ZWayVDev_zway_7-0-48-1";
     var vDevSens1 = controller.add(sens1, "Sens1");
-
-    var sw1 = {
-        "filter": "switchBinary",
-        "switchBinary": {
-            "device": dev1,
-            "ref": "ref-for-dev1"
-        }
-    };
-
-    var sw2 = {
-        "filter": "switchBinary",
-        "switchBinary": {
-            "device": dev2,
-            "ref": "LT"
-        }
-
-    };
-
-    var sw3 = {
-        "filter": "switchMultilevel",
-        "switchMultilevel": {
-            "device": "ZWayVDev_zway_13-0-38",
-            "startLevel": 70,
-            "endLevel": 0,
-            "ref": "Bed"
-        }
-    };
-
-    var oneSwitch = [sw1];
-
-    var threeSwitches = [sw1, sw2, sw3];
 
     var baseConfig = function () {
         return {
@@ -178,9 +168,26 @@ describe('TabularScheduler', function() {
         }
     };
 
-    sunrise = new Date(baseNow);
-    sunrise.setHours(6,59,59,3);
-    ts.metrics[['probeType','=','astronomy_sun_altitude'].join(""),'metrics:sunrise'] = sunrise;
+    describe('active hours', function() {
+        it('moving days', function() {
+            config.activeHours.startType = "sunset";
+            config.activeHours.startTime = "00:00";
+            config.activeHours.endType = "sunrise";
+            config.activeHours.endTime = "00:00";
+            ts.init(config);
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.activeHours),"Sun 19:00->Mon 06:59");
+            assert.equal(ts.fmt.format("{nextstart:D1}->{nextend:D1}", ts.activeHours),"Mon 19:00->Tue 06:59");
+            clock.moveTo(0, 1); // Move to next day
+            setSunrise(6, 58, 59, 3);
+            setSunset(19, 1, 2, 3);
+            clock.moveTo(8, 0);
+            printf("Active hours: {start:D1}->{end:D1}", ts.activeHours);
+            printf("Active hours: {nextstart:D1}->{nextend:D1}", ts.activeHours);
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.activeHours),"Mon 19:00->Tue 06:59");
+            assert.equal(ts.fmt.format("{nextstart:D1}->{nextend:D1}", ts.activeHours),"Tue 19:01->Wed 06:58");
+
+        });
+    });
 
     describe('start/stop presence=any', function() {
         it('start/end, times within activeHours, and reschedule presence=any, 1 light', function() {
@@ -242,9 +249,9 @@ describe('TabularScheduler', function() {
             assert.equal(clock.getHRDateformat(scheduled.scheduledLight.end), clock.getHRDateformat(new Date(end.getTime()+24*60*60*1000)), " end should have increased by 24 hours");
         });
 
+        // TODO: add 3rd switch test
         it('start/end, start before activeHours and reschedule presence=any, 3 lights', function() {
             config.timetable[0].startTime = "15:00"; // Before activeHours.startTime;
-            config.switches = threeSwitches;
             ts.init(config);
 
             clock.moveTo(16,0); // At start time for entry 0 in timetable
@@ -256,6 +263,28 @@ describe('TabularScheduler', function() {
 
             clock.moveTo( 3, 0); // At end for entry 0 in timetable
             assert.equal(ts.getDev(dev1).timesSetTo["off"], 1, dev1 + " should have been turned off once as end time reached");
+
+            clock.moveTo(6, 0);
+            clock.moveTo(6, 1);
+        });
+
+        it('start/end, start before activeHours and reschedule presence=any, multilevel', function() {
+            config.timetable[0].startTime = "15:00"; // Before activeHours.startTime;
+            config.timetable[0].device = dev3;
+            config.onLevel = 55;
+            ts.init(config);
+
+            clock.moveTo(16,0); // At start time for entry 0 in timetable
+            assert.equal(ts.getDev(dev3).timesSetTo["on"], 1, dev1 + " should have been turned on once");
+            assert.equal(ts.getDev(dev3).get("metrics:level"), 55);
+
+            clock.moveTo(16,2);
+            assert.equal(ts.getDev(dev3).timesSetTo["on"], 1, dev1 + " shouldn't be triggered to on again");
+            assert.equal(ts.getDev(dev3).timesSetTo['off'], 0, dev1 + " shouldn't have ever been turned off");
+
+            clock.moveTo( 3, 0); // At end for entry 0 in timetable
+            assert.equal(ts.getDev(dev3).timesSetTo["off"], 1, dev1 + " should have been turned off once as end time reached");
+            assert.equal(ts.getDev(dev3).get("metrics:level"), 0);
 
             clock.moveTo(6, 0);
             clock.moveTo(6, 1);
@@ -281,15 +310,7 @@ describe('TabularScheduler', function() {
 
 
         it('start/end, start before activeHours and sunset moved earlier on reschedule, 1 light', function() {
-            var setSunset = function(hours, min, sec, ms) {
-                var sunset = new Date(baseNow);
-                sunset.setHours(hours,min,sec,ms);
-                ts.metrics[['probeType','=','astronomy_sun_altitude'].join(""),'metrics:sunset'] = sunset;
-            };
             setSunset(18,3,2,3);
-            var sunset = new Date(baseNow);
-            sunset.setHours(18,3,2,3);
-            ts.metrics[['probeType','=','astronomy_sun_altitude'].join(""),'metrics:sunset'] = sunset;
             config.activeHours.startType = "sunset";
             config.timetable[0].startTime = "15:00"; // Before activeHours.startTime;
             ts.init(config);
@@ -350,6 +371,33 @@ describe('TabularScheduler', function() {
             var end = scheduled[0].scheduledLight.end;
             //console.log(scheduled);
             assert.equal(ts.fmt.format("{:D1}->{:D1}", start, end), "Sun 19:01->Mon 03:00");
+        });
+    });
+
+    describe('vary poll interval', function() {
+        it('poll interval 5 secs', function () {
+            config.pollInterval = 5;
+            clock.moveBy(100);
+            ts.init(config);
+            clock.setIncrement(100);
+            clock.moveBy(4800);
+            assert(ts.tmpTimeoutId !== undefined);
+            clock.moveBy(100);
+            assert(ts.tmpTimeoutId === undefined);
+            clock.setIncrement(1000);
+            clock.moveBy(55000);
+            var intervals = clock.getIntervals();
+            printf("Interval 0: " + clock.getDateFormat(intervals[0], true));
+            clock.setIncrement(60*1000);
+            clock.moveTo(19, 0); // 1 minutes before start time for entry 0 in timetable
+            clock.moveBy(50*1000);
+            clock.setIncrement(1000);
+            clock.moveBy(9000);
+            assert.equal(ts.getDev(dev1).timesSetTo["on"], 0);
+            var intervals = clock.getIntervals();
+            printf("Interval 0: " + clock.getDateFormat(intervals[0], true));
+            clock.moveBy(1000);
+            assert.equal(ts.getDev(dev1).timesSetTo["on"], 1, dev1 + " should have been turned on once");
         });
     });
 
@@ -452,19 +500,19 @@ describe('TabularScheduler', function() {
            var a2  = new Date(2018, 11, 4, 10, 0);
 
            clock.setDateAndReset(b1);
+           config.activeHours.startTime = "16:00"; // s above
+           config.activeHours.endTime   = "07:00"; // e above
            ts.init(config);
 
            var chgMins = function(time, mins) {
-              return new Date(time.getTime() + mins*60*1000);
+               return new Date(time.getTime() + mins*60*1000);
            };
            var addDays = function(time, days) {
                if (time === null) return null;
                return new Date(time.getTime() + days*24*60*60*1000);
-           };
 
-           config.activeHours.startTime = "16:00"; // s above
-           config.activeHours.endTime   = "07:00"; // e above
-           var activeHours = ts.getActiveHours();
+           };
+           var activeHours = ts.activeHours;
 
            var test1 = [
                // period, expected,   assertion comment
@@ -668,7 +716,6 @@ describe('TabularScheduler', function() {
 
         it('sensor trigger - active times, schedule not activating', function () {
             config.activeHours.set = true;
-            config.switches = threeSwitches;
             ts.init(config);
 
             console.log("Lights before sensor triggered:" + JSON.stringify(ts.lights));

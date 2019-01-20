@@ -1,0 +1,40 @@
+{
+	"singleton" : false,
+	"dependencies": [],
+	"category": "automation_basic",
+	"author": "Z-Wave.Me",
+	"homepage": "http://razberry.z-wave.me",
+	"icon": "icon.png",
+	"moduleName": "DummyDeviceExtra",
+	"version": "0.0.1",
+	"maturity": "beta",
+	"repository": {
+		"type": "git",
+		"source": ""
+	},
+	"defaults" : {
+		"title" : "__m_title__",
+		"description" : "__m_descr__",
+		"deviceType" : "switchBinary"
+	},
+	"schema" : {
+		"type" : "object",
+		"properties" : {
+			"deviceType" : {
+				"type" : "string",
+				"enum" : ["switchBinary", "switchMultilevel", "sensorBinary"],
+				"default" : "switchBinary",
+				"required" : true
+			}
+		}
+	},
+	"options" : {
+		"fields" : {
+			"deviceType" : {
+				"label" : "__l_options__",
+				"type" : "select",
+				"optionLabels" : ["Binary switch", "Multilevel switch", "Binary sensor"]
+			}
+		}
+	}
+}

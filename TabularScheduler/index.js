@@ -37,7 +37,6 @@ function TabularScheduler(id, controller) {
     this.lights = undefined;
     this.schedule = undefined;
     this.scheduled = undefined;
-    this.activeHours = undefined;
 
     this.vDev = undefined;
 }
@@ -47,10 +46,9 @@ inherits(TabularScheduler, BaseModule);
 _module = TabularScheduler;
 
 /*
-TODO: adjust times due to change when activeHours change.  Consider incorporating astronomy code to avoid need for this
-TODO: define polling interval
-TODO: make sure timeout for sensors not messed up by a re-start
-TODO: ensure timeouts cleared down
+TODO: honour timeout for sensors when re-starting?
+TODO: keep working with 1 or more failed devices
+TODO: ensure precision kept for times/randomness
 
 How start/end are triggered
   Check the times against recorded times in self.scheduled
@@ -75,6 +73,8 @@ TabularScheduler.prototype.init = function (config) {
     TabularScheduler.super_.prototype.init.call(this, config);
     var self = this;
 
+    self.activeHours = undefined;
+
     // Create vdev
     self.vDev = this.controller.devices.create({
         deviceId: "TabularScheduler_" + self.id,
@@ -83,7 +83,7 @@ TabularScheduler.prototype.init = function (config) {
                 level: 'off',
                 sensorsTriggered: false,
                 onBySchedule: 0,
-                title: self.langFile.m_title,
+                title: self.getInstanceTitle(),
                 icon: self.imagePath + '/icon-out-of-hours.png'
             }
         },
@@ -124,7 +124,7 @@ TabularScheduler.prototype.init = function (config) {
         var wait = 12;
         self.info("init: devices not all initialised when starting. Wait for {}secs", wait);
         // Wait to do rest of initialization to ensure devices are setup and so can refer to their names
-        setTimeout(_.bind(self.rerunableInit, self, false), wait*1000);
+        self.tmpTimeoutId = setTimeout(_.bind(self.rerunableInit, self, false), wait*1000);
     }
 };
 
@@ -132,6 +132,7 @@ TabularScheduler.prototype.rerunableInit = function(firstRun) {
     var self = this;
 
     self.debug("rerunableInit(firstRun={}) config={}}", self.config);
+    self.tmpTimeoutId = undefined;
 
     if (firstRun) {
         self.lights = {
@@ -228,7 +229,7 @@ TabularScheduler.prototype.rerunableInit = function(firstRun) {
         self.controller.on("presence." + presenceMode, self.callbackPresence);
     });
     if (self.config.activeHours.set) {
-        self.activeHours = self.getActiveHours();
+        self.initActiveHours();
         self.summary("Active hours: {start:Dt} -> {end:Dt}", self.activeHours);
     } else {
         self.activeHours = undefined;
@@ -246,7 +247,19 @@ TabularScheduler.prototype.rerunableInit = function(firstRun) {
 
     self.eventTimes = self.getEventTimes();
 
-    self.checkEventsId = setInterval(_.bind(self.checkEvents, self, false), 60*1000);
+    // Sync clock e.g. if time is 10:32:20.109 and polling interval is 60 seconds then
+    // wait until 10:33:00.000 i.e. for 39.891 seconds before starting polling
+    // In practice doesn't work very well
+    self.pollIntervalMs = self.config.pollInterval * 1000;
+    now = self.now();
+    var msIntoMin = now.getSeconds()*1000 + now.getMilliseconds();
+    var waitFor = self.pollIntervalMs - (msIntoMin % self.pollIntervalMs);
+    self.info("Will wait {}ms, so polling is synchronised to clock seconds", waitFor);
+    self.tmpTimeoutId = setTimeout(function() {
+        self.tmpTimeoutId = undefined;
+        self.checkEventsId = setInterval(_.bind(self.checkEvents, self, false), self.pollIntervalMs);
+        self.info("Synched to clock @{:DD}", self.now());
+    }, waitFor);
 
     return true;
 };
@@ -257,7 +270,9 @@ TabularScheduler.prototype.stop = function () {
     self.debug1("stop entered");
     if (!self.schedule) return;
 
-    clearInterval(self.checkEventsId);
+    if (!!self.sensors && !!self.sensors.offTimeout) clearTimeout(self.sensors.offTimeout);
+    if (!!self.tmpTimeoutId) clearTimeout(self.tmpTimeoutId);
+    if (!!self.checkEventsId) clearInterval(self.checkEventsId);
 
     self.processDeviceList(_.map(self.lights.byDevice, function(light) { return light.getDev(); }), function (vDev) {
         vDev.off('modify:metrics:level', self.callbackLight);
@@ -294,6 +309,7 @@ TabularScheduler.prototype.checkEvents = function() {
     var self = this;
 
     var now = self.now();
+    self.info("Checking for events @{:DD}", now);
     if (!!self.activeHours) {
         if (self.vDev.get('metrics:level') === 'off') {
             //self.debug("checkEvents not in active hours which are {start:Dt}->{end:Dt}", self.activeHours);
@@ -449,7 +465,7 @@ TabularScheduler.prototype.calculateScheduledLight = function (scheduleEntry, li
     var now = self.now();
 
     ["start", "end"].forEach(function (event) {
-        period[event] = self.getEventTime('time', scheduleEntry[event + 'Time']);
+        period[event] = self.getEventTime('time', now, scheduleEntry[event + 'Time']);
         scheduledLight['rand' + event] = _.random(scheduleEntry.maxRandMs) * (event==='end' ? -1 : 1);
     });
     var start = period.start;
@@ -484,8 +500,6 @@ TabularScheduler.prototype.calculateScheduledLight = function (scheduleEntry, li
             scheduledLight.start < now ||
             !validStartDay)) scheduledLight.start = null;
 
-    self.info("   scheduled light: {}, start suspended: {}, triggered: {}", light.getRef(), scheduledLight.startSuspended,
-        scheduledLight.triggered);
     self.debug("   scheduled light {:S}", scheduledLight);
 
     if (scheduledLight.end !== null) {
@@ -503,34 +517,46 @@ TabularScheduler.prototype.now = function () {
     return new Date(); // Can be overridden for testing
 };
 
-TabularScheduler.prototype.getActiveHours = function() {
+TabularScheduler.prototype.calcActiveHours = function(activeHours, prefix, adjust) {
     var self = this;
+    var now = self.now();
 
     var activeHoursCfg = self.config.activeHours;
-    var activeHours = {
-        // TODO: Change way of getting sunrise and sunset
-        "start": self.getEventTime(activeHoursCfg.startType, activeHoursCfg.startTime),
-        "end": self.getEventTime(activeHoursCfg.endType, activeHoursCfg.endTime)
-    };
+    var start = self.getEventTime(activeHoursCfg.startType, now, activeHoursCfg.startTime);
+    var end   = self.getEventTime(activeHoursCfg.endType, now, activeHoursCfg.endTime);
 
-    // TODO: could a few secs difference break this?
-    if (activeHours.end <= self.now()) {
-        activeHours.end = self.moveTime(activeHours.end, 24);
-    }
-    if (activeHours.start > activeHours.end) {
-        activeHours.start = self.moveTime(activeHours.start, -24);
-    }
+    if (end <= now) end = self.moveTime(end, 24);
+    if (start > end) start = self.moveTime(start, -24);
 
+    activeHours[prefix + 'start'] = adjust === 0 ? start : self.moveTime(start, adjust);
+    activeHours[prefix + 'end']   = adjust === 0 ? end   : self.moveTime(end, adjust);
+}
+
+TabularScheduler.prototype.initActiveHours = function() {
+    var self = this;
+    var activeHours = {};
+    self.calcActiveHours(activeHours, '', 0);
     activeHours.nextstart = self.moveTime(activeHours.start, 24);
     activeHours.nextend = self.moveTime(activeHours.end, 24);
 
-    self.debug("getActiveHours returns {start:Dt}->{end:Dt}", activeHours);
-    return activeHours;
+    self.debug("initActiveHours: {start:Dt}->{end:Dt}", activeHours);
+    self.activeHours = activeHours;
 };
 
+TabularScheduler.prototype.updateActiveHours = function() {
+    var self = this;
+    var now = self.now();
 
+    var activeHours = {};
+    activeHours.start = self.activeHours.nextstart;
+    activeHours.end   = self.activeHours.nextend;
+    self.calcActiveHours(activeHours, 'next', 24);
 
-TabularScheduler.prototype.getEventTime = function (type, timeAdjust) {
+    self.debug("updateActiveHours: {start:Dt}->{end:Dt}", activeHours);
+    self.activeHours = activeHours;
+};
+
+TabularScheduler.prototype.getEventTime = function (type, now, timeAdjust) {
     var self = this;
 
     if (!timeAdjust) timeAdjust = "00:00";
@@ -539,7 +565,6 @@ TabularScheduler.prototype.getEventTime = function (type, timeAdjust) {
     var hours = timeAdjustArr[0];
     var mins = timeAdjustArr[1];
     var timeAdj = hours * 60 * 60 * 1000 + mins * 60 * 1000;
-    var now = self.now();
     var time = new Date(now.getTime());
     self.debug1("getEventTime type " + type + " timeAdjust " + timeAdjust + " now=", now);
     switch (type) {
@@ -558,7 +583,7 @@ TabularScheduler.prototype.getEventTime = function (type, timeAdjust) {
             time.setTime(time.getTime() - timeAdj);
             break;
         case "sunrise":
-            time.setTime(self.getSunrise);
+            time.setTime(self.getSunrise());
             break;
         case "sunrisePlus":
             time.setTime(self.getSunrise());
@@ -652,7 +677,7 @@ TabularScheduler.prototype.handleActiveHoursStart = function() {
 TabularScheduler.prototype.handleActiveHoursEnd = function() {
     // Re-calculate active hours once a day when period ends
     var self = this;
-    self.activeHours = self.getActiveHours();
+    self.updateActiveHours();
     self.summary("Active hours: {start:Dt} -> {end:Dt}", self.activeHours);
     // TODO: turn off lights that were triggered by sensors or schedule?
 
@@ -693,6 +718,8 @@ TabularLight = function(device, num, vDev, tabular) {
     this.device = device;
     this.num = num;
     this.title = vDev.get("metrics:title");
+    this.deviceType = vDev.get("deviceType");
+    this.onLevel = tabular.config.onLevel;
     this.onStatus = undefined;
     this.onBy = undefined;
     this.startLevel = undefined;
@@ -710,11 +737,12 @@ TabularLight.prototype.toJSON = function () {
 };
 
 TabularLight.prototype.getRef = function() {
-    return 'Light/' + this.num + ' ' + (!!this.ref ? this.ref : this.title) + '/' + this.device;
+    return 'Light/' + this.num + ' ' + this.title + '/' + this.device;
 };
 
 TabularLight.prototype.setOnStatus = function(vDev) {
-    this.onStatus = vDev.get("metrics:level") === 'on' ? true : false;
+    var level = vDev.get("metrics:level");
+    this.onStatus = this.deviceType === 'switchMultilevel' ? level > 0 : level === 'on';
 };
 
 TabularLight.prototype.changeLight = function (event, source) {
@@ -731,7 +759,11 @@ TabularLight.prototype.changeLight = function (event, source) {
             self.onBy = undefined;
         }
         var onOff = (event === "start") ? 'on' : 'off';
-        self.getDev().performCommand(onOff);
+        if (self.deviceType === 'switchMultilevel') {
+            self.getDev().performCommand('exact', { level: onOff === "on" ? self.onLevel : 0 })
+        } else {
+            self.getDev().performCommand(onOff);
+        }
 
         self.tabular.summary("changeLight due to {}:{} {} turning {}", source, event, self.getRef(), onOff);
         if (source === 'schedule') {
@@ -756,7 +788,14 @@ TabularFormat.prototype.shortDateTimeFormat = function(date) {
 };
 
 TabularFormat.prototype.dayAndTimeFormat = function(date) {
-    return date == null ? "-" : this.days[date.getDay()] + " " + ('00' + date.getHours()).slice(-2) + ":" + ('00' + date.getMinutes()).slice(-2);
+    return date == null ? "-" : this.days[date.getDay()] + " " + ('00' + date.getHours()).slice(-2) + ":" +
+        ('00' + date.getMinutes()).slice(-2);
+};
+
+TabularFormat.prototype.granulerDayAndTimeFormat = function(date) {
+    return date == null ? "-" : this.days[date.getDay()] + " " + ('00' + date.getHours()).slice(-2) + ":" +
+        ('00' + date.getMinutes()).slice(-2) + ":" + ('00' + date.getSeconds()).slice(-2) + "." +
+        ('000' + date.getMilliseconds()).slice(-3);
 };
 
 TabularFormat.prototype.format = function() {
@@ -784,6 +823,7 @@ TabularFormat.prototype.format = function() {
                 case 'p':  return s + val;
                 case 'Dt': return s + self.shortDateTimeFormat(val);
                 case 'D1': return s + self.dayAndTimeFormat(val);
+                case 'DD': return s + self.granulerDayAndTimeFormat(val);
                 case 'EEE': return s + self.days[val.getDay()];
                 case 'S':  return s + JSON.stringify(val);
                 case 's':  return s + val.toString();
