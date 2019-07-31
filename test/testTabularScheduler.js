@@ -1,7 +1,8 @@
 //var assert = require('assert');
 var assert = require('chai').assert;
 var sinon = require('sinon');
-var logging = "summary"; // summary, detailed or veryDetailed
+var SunCalc = require('suncalc');
+var logging = "detailed"; // summary, detailed or veryDetailed
 
 //const
 leftPad = require('left-pad');
@@ -74,6 +75,7 @@ describe('TabularScheduler', function() {
 
     this._ = _;
     this.assert = assert;
+    this.SunCalc = SunCalc;
 
     executeFile('test/AutomationControllerMock.js', this);
     executeFile('test/ClockMock.js', this);
@@ -112,6 +114,15 @@ describe('TabularScheduler', function() {
     };
 
     var ts = new this.TabularScheduler(1, controller);
+    clock.provideSunriseSunsetTimes(
+        // https://www.timeanddate.com/sun/uk/brentwood?month=3&year=2019 shows sunsise/sunste on different dates/locations
+        [
+            {day: '2019-03-29', sunrise: '05:41', sunset: '18:26' },
+            {day: '2019-03-30', sunrise: '05:39', sunset: '18:28' },
+            {day: '2019-03-31', sunrise: '06:36', sunset: '19:29' }, // Sun - switch to BST
+            {day: '2019-04-01', sunrise: '06:34', sunset: '19:31' },
+            {day: '2019-04-12', sunrise: '06:10', sunset: '19:50'}
+        ], ts);
     ts.meta.defaults.title = "TabularScheduler";
     ts.langFile = {m_title:"TabularScheduler"};
     ts.getInstanceTitle = function() {return "TabularScheduler"};
@@ -136,7 +147,7 @@ describe('TabularScheduler', function() {
             "timetable": [{
                     "presence": "any",
                     "randomise": "no",
-                    "days": "0,1,2,3,4,5,6",
+                    "days": ["0,1,2,3,4,5,6"],
                     "startTime": "19:01",
                     "endTime": "03:00",
                     "device": dev1
@@ -144,7 +155,7 @@ describe('TabularScheduler', function() {
                 {
                     "presence": "any",
                     "randomise": "no",
-                    "days": "0,1,2,3,4,5,6",
+                    "days": ["0,1,2,3,4,5,6"],
                     "startTime": "06:00",
                     "endTime": "07:00",
                     "device": dev2
@@ -161,6 +172,7 @@ describe('TabularScheduler', function() {
                 "set":false,
                 "sensors":["ZWayVDev_zway_7-0-48-1"],
                 "timeout":"1",
+                "lightCheck": "notification",
                 "switches": [dev1, dev2]
             },
             "pollInterval": 60,
@@ -169,22 +181,52 @@ describe('TabularScheduler', function() {
     };
 
     describe('active hours', function() {
+        it('calculateActiveHours just before moving to BST', function() {
+            ts.latitude = 51.63444;
+            ts.longitude = 0.33527;
+            var activeHoursCfg = {
+                startType: "sunset",
+                startTime: 0,
+                endType: "sunrise",
+                endTime: 0
+            };
+            var now = new Date(2019, 2, 30, 0, 0, 0, 0);
+            var activeHours = ts.calculateActiveHours(now, activeHoursCfg);
+            // Change to DST on Sun 31st - clocks go forward 1 hour
+            assert.equal(fmt.format("{start:D1}->{end:D1}", activeHours),"Fri 18:26->Sat 05:40");
+            assert.equal(fmt.format("{nextstart:D1}->{nextend:D1}", activeHours),"Sat 18:28->Sun 06:38");
+        });
+
+        it('calculateActiveHours just before moving to GMT', function() {
+            ts.latitude = 51.63444;
+            ts.longitude = 0.33527;
+            var activeHoursCfg = {
+                startType: "sunset",
+                startTime: 0,
+                endType: "sunrise",
+                endTime: 0
+            };
+            var now = new Date(2018, 9, 26, 15, 0, 0, 0);
+            var activeHours = ts.calculateActiveHours(now, activeHoursCfg);
+            // Change to DST on Sun 31st - clocks go forward 1 hour
+            assert.equal(fmt.format("{start:D1}->{end:D1}", activeHours),"Fri 17:44->Sat 07:44");
+            assert.equal(fmt.format("{nextstart:D1}->{nextend:D1}", activeHours),"Sat 17:43->Sun 06:46");
+        });
+
         it('moving days', function() {
             config.activeHours.startType = "sunset";
             config.activeHours.startTime = "00:00";
             config.activeHours.endType = "sunrise";
             config.activeHours.endTime = "00:00";
             ts.init(config);
-            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.activeHours),"Sun 19:00->Mon 06:59");
-            assert.equal(ts.fmt.format("{nextstart:D1}->{nextend:D1}", ts.activeHours),"Mon 19:00->Tue 06:59");
-            clock.moveTo(0, 1); // Move to next day
-            setSunrise(6, 58, 59, 3);
-            setSunset(19, 1, 2, 3);
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.activeHours),"Sun 18:22->Mon 07:13");
+            assert.equal(ts.fmt.format("{nextstart:D1}->{nextend:D1}", ts.activeHours),"Mon 18:20->Tue 07:15");
+            clock.moveTo(0, 1); // Move to next day (Mon)
             clock.moveTo(8, 0);
             printf("Active hours: {start:D1}->{end:D1}", ts.activeHours);
-            printf("Active hours: {nextstart:D1}->{nextend:D1}", ts.activeHours);
-            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.activeHours),"Mon 19:00->Tue 06:59");
-            assert.equal(ts.fmt.format("{nextstart:D1}->{nextend:D1}", ts.activeHours),"Tue 19:01->Wed 06:58");
+            printf("Active hours (next): {nextstart:D1}->{nextend:D1}", ts.activeHours);
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.activeHours),"Mon 18:20->Tue 07:15");
+            assert.equal(ts.fmt.format("{nextstart:D1}->{nextend:D1}", ts.activeHours),"Tue 18:18->Wed 07:17");
 
         });
     });
@@ -317,23 +359,23 @@ describe('TabularScheduler', function() {
             var scheduled = ts.scheduled[0];
             var start = scheduled.scheduledLight.start;
             var end = scheduled.scheduledLight.end;
-            assert.equal(fmt.format("{start:D1}->{end:D1}", scheduled.scheduledLight), "Sun 18:03->Mon 03:00"); // Moved to activeHouse.startTime
+            assert.equal(fmt.format("{start:D1}->{end:D1}", scheduled.scheduledLight), "Sun 18:22->Mon 03:00"); // Moved to activeHouse.startTime
             //assert(start > clock.getTime(), "Start time should be greater than <now>");
             //assert(end > scheduled[0].scheduledLights[0].start.getTime(), "Start time should be greater than end time");
             assert(scheduled.active, "Should be active");
 
             assert.equal(ts.getDev(dev1).timesSetTo['on'], 0, dev1 + " shouldn't have ever been turned on as start time not reached");
 
-            clock.moveTo(18,3); // At start time for entry 0 in timetable
+            clock.moveTo(18,22); // At start time for entry 0 in timetable
             assert.equal(ts.getDev(dev1).timesSetTo["on"], 1, dev1 + " should have been turned on once");
 
             clock.moveTo(3, 0);
-            assert.equal(fmt.format("{start:D1}->{end:D1}", scheduled.scheduledLight), "Mon 18:03->Tue 03:00");
+            assert.equal(fmt.format("{start:D1}->{end:D1}", scheduled.scheduledLight), "Mon 18:20->Tue 03:00");
             setSunset(18,5,0, 0);
             clock.moveTo(6, 0);
 
             assert.equal(ts.getDev(dev1).timesSetTo["off"], 1, dev1 + " should have been turned off once as end time reached");
-            assert.equal(clock.getHRDateformat(scheduled.scheduledLight.start), clock.getHRDateformat(new Date(start.getTime()+24*60*60*1000)), " start should have increased by 24 hours");
+            assert.equal(clock.getHRDateformat(scheduled.scheduledLight.start), "2017-10-09 18:20 Mon");
             assert.equal(clock.getHRDateformat(scheduled.scheduledLight.end), clock.getHRDateformat(new Date(end.getTime()+24*60*60*1000)), " end should have increased by 24 hours");
 
             /*
@@ -344,17 +386,17 @@ describe('TabularScheduler', function() {
             clock.moveTo(18, 5);
             assert.equal(ts.getDev(dev1).timesSetTo["on"], 2, dev1 + " should have been turned on twice");
             */
-            //@@@
         });
     });
 
 
-    describe('simulate init after z-wave service is started', function() {
+    describe('simulate devices not being present', function() {
         beforeEach(function () {
-            controller.hide(); // Causes devices to be hidden i.e. appears that they're not yet configured
         });
 
         it('initially vDevs not set - simulate waiting when this happens', function () {
+            controller.hide(); // Causes devices to be hidden i.e. appears that they're not yet configured
+
             var vDev = controller.devices.get("ZWayVDev_zway_15-0-37");
             assert.equal(vDev, null);
 
@@ -362,15 +404,24 @@ describe('TabularScheduler', function() {
 
             controller.unhide();
             clock.moveBy(12000);
-            //completeTimeout();
 
             vDev = controller.devices.get("ZWayVDev_zway_15-0-37");
             assert(!!vDev, "Simulated wait for devices to be initialised so vDev shouldn't be null");
             var scheduled = ts.scheduled;
             var start = scheduled[0].scheduledLight.start;
             var end = scheduled[0].scheduledLight.end;
-            //console.log(scheduled);
             assert.equal(ts.fmt.format("{:D1}->{:D1}", start, end), "Sun 19:01->Mon 03:00");
+        });
+
+        it('simulate one device not working', function() {
+            config.timetable[1].device = "Device_does_not_exist";
+            config.sensorTrigger.set = true;
+            ts.init(config);
+            clock.moveBy(12000);
+
+            assert.equal(ts.scheduled.length, 1, "Only one of two devices working");
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.scheduled[0].scheduledLight), "Sun 19:01->Mon 03:00");
+            assert.equal(ts.sensors.lights.length, 2, "Both lights referred to by sensors working");
         });
     });
 
@@ -419,6 +470,36 @@ describe('TabularScheduler', function() {
             assert(!ts.scheduled[0].active, "Shouldn't be active");
             clock.moveTo(19,1); // At start time for entry 0 in timetable
             assert.equal(ts.getDev(dev1).timesSetTo['on'], 0, dev1 + " shouldn't have been turned on as away");
+        });
+
+        it('presence=home->away->home', function() {
+            // Added based on actual issue, although failed to reproduce
+            config.timetable[0].startTime = "12:00";
+            config.timetable[0].endTime = "23:00"
+            config.activeHours.set = true;
+            config.activeHours.startType = "sunsetPlus";
+            config.activeHours.startTime = "00:06";
+            config.activeHours.endType = "sunriseMinus";
+            config.activeHours.endTime = "00:05";
+            config.timetable[0].presence = "any";
+            config.timetable.splice(1,1); // Now only have 1 entry
+            ts.metrics[['probeType','=','presence'].join(""),'metrics:mode'] = "home";
+            clock.setDateAndReset(new Date(2019, 3, 11, 8, 0));
+            ts.init(config);
+            assert(ts.scheduled[0].active, "Should be active");
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.scheduled[0].scheduledLight), "Thu 19:54->Thu 23:00");
+            clock.moveTo(23,1); // At start time for entry 0 in timetable
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.scheduled[0].scheduledLight), "Fri 19:56->Fri 23:00");
+            clock.moveTo(9, 36);
+            ts.metrics[['probeType','=','presence'].join(""),'metrics:mode'] = "away";
+            ts.handlePresence();
+            assert(ts.scheduled[0].active, "Should be active");
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.scheduled[0].scheduledLight), "Fri 19:56->Fri 23:00");
+            ts.metrics[['probeType','=','presence'].join(""),'metrics:mode'] = "home";
+            ts.handlePresence();
+            // Actual problem was this shifting to start of Fri 20:19
+            // and then after further ->away->home to       Fri 20:39
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", ts.scheduled[0].scheduledLight), "Fri 19:56->Fri 23:00");
         });
 
         it('presence=away and away', function() {
@@ -559,7 +640,7 @@ describe('TabularScheduler', function() {
         });
 
         it('first timetable entry as randomise, inside active hours, to start tomorrow with start/end rand', function() {
-            config.timetable[0].days = "1,2,3,4,5";
+            config.timetable[0].days = ["1,2,3,4,5"];
             config.timetable.splice(1,1); // Now only have 1 entry
             config.timetable[0].randomise = "yes";
             config.maxRand = 10;
@@ -650,7 +731,7 @@ describe('TabularScheduler', function() {
 
     describe('day variation', function() {
         it('triggered weekend and enabled for weekdays', function () {
-            config.timetable[0].days = "1,2,3,4,5";
+            config.timetable[0].days = ["1,2,3,4,5"];
             config.timetable[0].endTime = "19:03";
             ts.init(config);
             clock.moveTo(19, 1); // Now is Sun.  At start time for entry 0 in timetable
@@ -714,6 +795,23 @@ describe('TabularScheduler', function() {
             assert.equal(ts.getDev(dev1).timesSetTo['off'], 1, dev1 + " should have been turned off once");
         });
 
+        it('sensor trigger - no active times, schedule not activating, device from timetable', function () {
+            config.timetable[1].device = dev1;
+            config.sensorTrigger.switches = [];
+            ts.init(config);
+            assert.equal(ts.sensors.lights.length, 1, "should have de-duped the devices in the timetable");
+
+            vDevSens1.performCommand('on');
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1, dev1 + " should have been turned on");
+
+            clock.moveBy(121*1000);
+            vDevSens1.performCommand('off');
+
+            clock.moveBy(60*1000);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, false, "light should be off as off timeout triggered");
+        });
+
         it('sensor trigger - active times, schedule not activating', function () {
             config.activeHours.set = true;
             ts.init(config);
@@ -735,7 +833,7 @@ describe('TabularScheduler', function() {
             assert.equal(ts.getDev(dev1).timesSetTo['on'], 1, dev1 + " should have been turned on");
         });
 
-        it('sensor trigger - no active times, schedule not activating, only one switches', function () {
+        it('sensor trigger - no active times, schedule not activating, only one switch', function () {
             config.sensorTrigger.switches = [dev1];
             ts.init(config);
             console.log("Lights before sensor triggered:" + JSON.stringify(ts.lights));
@@ -765,7 +863,7 @@ describe('TabularScheduler', function() {
 
             clock.moveTo(19,1);
             assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
-            assert.equal(ts.getDev(dev1).timesSetTo['on'], 2, dev1 + " should have tried to turn on twice");
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1);
 
             vDevSens1.performCommand('off');
             assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should still be on as off timeout not yet triggered");
@@ -775,8 +873,8 @@ describe('TabularScheduler', function() {
         });
 
         it('sensor trigger - no active times, schedule activating before sensor trigger', function () {
+            config.sensorTrigger.switches = [dev1];
             ts.init(config);
-
             clock.moveTo(19,1);
             assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
             assert.equal(ts.getDev(dev1).timesSetTo['on'], 1, dev1 + " should have tried to turn on once");
@@ -784,13 +882,110 @@ describe('TabularScheduler', function() {
             clock.moveTo( 0, 10);
             vDevSens1.performCommand('on');
             assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
-            assert.equal(ts.getDev(dev1).timesSetTo['on'], 2, dev1 + " should have tried to turn on twice");
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1);
 
             vDevSens1.performCommand('off');
             assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should still be on as off timeout not yet triggered");
 
             clock.moveBy(60*1000);
             assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should still be on because schedule turned it on");
+        });
+
+        it('sensor trigger - no active times, schedule activating, then restart, then sensor trigger,', function () {
+            config.timetable[1].device = dev1;
+            config.sensorTrigger.switches = [dev1];
+            ts.init(config);
+            clock.moveTo(19,1);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1, dev1 + " should have tried to turn on once");
+
+            clock.moveTo( 20, 2);
+            ts.stop();
+            ts.init(config);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true);
+
+            clock.moveTo( 0, 10);
+            vDevSens1.performCommand('on');
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1);
+
+            vDevSens1.performCommand('off');
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should still be on as off timeout not yet triggered");
+
+            clock.moveBy(60*1000);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should still be on because schedule turned it on");
+        });
+
+        it('sensor trigger - lights only defined for schedule, no active times, schedule activating after sensor trigger', function () {
+            config.sensorTrigger.switches = []; // TODO: check this is now it is for real in z-way
+            ts.init(config);
+            assert.equal(ts.sensors.lights.length, 2);
+
+            clock.moveTo(19,0); // 1 minute before start time for entry 0 in timetable
+            vDevSens1.performCommand('on');
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
+            assert.equal(ts.lights.byDevice[dev2].onStatus, true, "light should be marked as on");
+
+            clock.moveTo(19,1);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1);
+
+            vDevSens1.performCommand('off');
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should still be on as off timeout not yet triggered");
+
+            clock.moveBy(60*1000);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should still be on because schedule started");
+        });
+
+        it('sensor trigger - no active times, device does not notify', function () {
+            vDev1.notify = false; // Simulate a light not support notification
+            config.sensorTrigger.lightCheck = 'query';
+            ts.init(config);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, false, "light should be marked as off");
+
+            vDevSens1.performCommand('on');
+            assert.equal(ts.lights.byDevice[dev1].onStatus, true, "light should be marked as on");
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1, dev1 + " should have been turned on");
+
+            vDevSens1.performCommand('off');
+            clock.moveBy(60*1000);
+            //completeTimeout();
+            assert.equal(ts.lights.byDevice[dev1].onStatus, false, "light should be off as off timeout triggered");
+            assert.equal(ts.getDev(dev1).timesSetTo['off'], 1, dev1 + " should have been turned off once");
+
+            clock.moveBy( 60*1000);
+            vDev1.performCommand('on');
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 2);
+            vDevSens1.performCommand('on');
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 2, dev1 + " already on so sensor should not have turned it on again");
+        });
+
+        it('sensor trigger - no active times, device does not notify, in query mode', function () {
+            vDev1.notify = false; // Simulate a light not support notification
+            config.sensorTrigger.lightCheck = 'query';
+            ts.init(config);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, false, "light should be marked as off");
+
+            vDev1.performCommand('on');
+            assert.equal(ts.lights.byDevice[dev1].onStatus, false); // Don't realise it is on
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1);
+            clock.moveBy( 60*1000);
+            vDevSens1.performCommand('on');
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1, dev1 + " checks if on");
+        });
+
+        it('sensor trigger - no active times, device does not notify, no way to check if light on', function () {
+            vDev1.notify = false; // Simulate a light not support notification
+            config.sensorTrigger.lightCheck = 'no';
+            ts.init(config);
+            assert.equal(ts.lights.byDevice[dev1].onStatus, false, "light should be marked as off");
+
+            vDev1.performCommand('on');
+            assert.equal(ts.lights.byDevice[dev1].onStatus, false); // Don't realise it is on
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 1);
+            clock.moveBy( 60*1000);
+            vDevSens1.performCommand('on');
+            assert.equal(ts.getDev(dev1).timesSetTo['on'], 2, dev1 + " does not check if on");
         });
 
     });
@@ -804,13 +999,45 @@ describe('TabularScheduler', function() {
             config.activeHours.endType = "sunriseMinus";
             config.activeHours.endTime = "00:00";
             ts.init(config);
+
             assert.equal(ts.fmt.format("{:D1}->{:D1}", ts.scheduled[0].scheduledLight.start, ts.scheduled[0].scheduledLight.end),
-                "Sun 18:30->Mon 03:00");
+                "Sun 17:52->Mon 03:00");
             printf("metrics {:S}", ts.vDev.metrics);
             assert.equal(ts.vDev.get("metrics:level"), 'off', 'Not in active hours so level should be off');
         });
 
         //TODO: add more here
+    });
+
+    describe('DST', function() {
+        /*
+          https://www.timeanddate.com/sun/uk/brentwood?month=3&year=2019 shows sunsise/sunste on different dates/locations
+         */
+        beforeEach(function () {
+            var diffBase = new Date(2019, 2, 29, 8, 0); // Fri, Sun is change to BST
+            clock.setDateAndReset(diffBase);
+            config.timetable[0].startTime = "12:00";
+            config.timetable[0].endTime = "23:00"
+            config.activeHours = {
+                "set":true,
+                    "startType": "sunset",
+                    "startTime":"00:00",
+                    "endType": "sunrise",
+                    "endTime":"00:00"};
+        });
+
+        it('move into DST', function() {
+            ts.init(config);
+            var eventTimes = ts.getEventTimes();
+            var scheduled = ts.scheduled[0];
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", scheduled.scheduledLight), "Fri 18:26->Fri 23:00");
+
+            clock.moveTo(23,0);
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", scheduled.scheduledLight), "Sat 18:28->Sat 23:00");
+            clock.moveTo(23,0);
+
+            assert.equal(ts.fmt.format("{start:D1}->{end:D1}", scheduled.scheduledLight), "Sun 19:29->Sun 23:00");
+        });
     });
 
     describe('config of days', function() {
@@ -846,7 +1073,7 @@ describe('TabularScheduler', function() {
         });
 
         it("end shouldn't result in light off", function() {
-            config.timetable[0].days = "1,2,3,4,5";
+            config.timetable[0].days = ["1,2,3,4,5"];
             ts.init(config);
             clock.moveTo(19,1);
             assert.equal(ts.getDev(dev1).timesSetTo['on'], 0, dev1 + " shouldn't have been turned on");

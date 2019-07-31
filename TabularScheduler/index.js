@@ -29,9 +29,11 @@ function TabularScheduler(id, controller) {
     // Call super-constructor first (AutomationModule)
     TabularScheduler.super_.call(this, id, controller);
 
+    this.cronName = undefined;
     this.callbackPresence = undefined;
     this.callbackSensor = undefined;
     this.callbackLight = undefined;
+    this.callbackCron = undefined;
 
     this.sensors = undefined;
     this.lights = undefined;
@@ -47,8 +49,17 @@ _module = TabularScheduler;
 
 /*
 TODO: honour timeout for sensors when re-starting?
-TODO: keep working with 1 or more failed devices
 TODO: ensure precision kept for times/randomness
+TODO: setInterval isn't staying synched, so can easily get lights turning on almost a minute late.
+  Switch to using cron every minute and decide if current mechanism to be used for faster polling
+TODO: 1 hour too early when going to DST
+
+Also problem that occured on day of DST (happens 1am on 31-Mar
+z-way-server.log.2.gz:[2019-03-31 05:37:50.002] [I] [core] [TabularSchedulerScheduler-14] [S]
+Active hours: Sun 31-Mar 18:33 -> Mon 1-Apr 05:35
+z-way-server.log.2.gz:[2019-03-31 23:00:02.822] [I] [core] [TabularSchedulerScheduler-14] [S]
+Scheduling entry #1 'Light/1 Front Light/ZWayVDev_zway_5-0-37' Mon 1-Apr 12:00->- to Mon 1-Apr 23:00->Mon 1-Apr 23:00
+Why no start time?
 
 How start/end are triggered
   Check the times against recorded times in self.scheduled
@@ -73,6 +84,7 @@ TabularScheduler.prototype.init = function (config) {
     TabularScheduler.super_.prototype.init.call(this, config);
     var self = this;
 
+    self.cronName = "TabularScheduler." + self.id;
     self.activeHours = undefined;
 
     // Create vdev
@@ -120,45 +132,44 @@ TabularScheduler.prototype.init = function (config) {
         return self.controller.devices.get(devId);
     };
 
-    if (!self.rerunableInit(true)) {
-        var wait = 12;
-        self.info("init: devices not all initialised when starting. Wait for {}secs", wait);
-        // Wait to do rest of initialization to ensure devices are setup and so can refer to their names
-        self.tmpTimeoutId = setTimeout(_.bind(self.rerunableInit, self, false), wait*1000);
-    }
+    self.rerunableInit(true);
 };
 
 TabularScheduler.prototype.rerunableInit = function(firstRun) {
     var self = this;
 
-    self.debug("rerunableInit(firstRun={}) config={}}", self.config);
+    self.debug("rerunableInit(firstRun={}) config={:S}}", firstRun, self.config);
     self.tmpTimeoutId = undefined;
 
-    if (firstRun) {
-        self.lights = {
-            byDevice: {},
-            numLights: 0,
-            changeLights: function (lights, event, source) {
-                // Returns number turned on
-                return _.reduce(lights, function (numTurnedOn, light) {
-                    numTurnedOn += light.changeLight(event, source) == 'turnedOn' ? 1 : 0;
-                    return numTurnedOn;
-                }, 0);
-            },
-            addOrGet: function (device) {
-                if (device in this.byDevice) {
-                    return this.byDevice[device];
-                }
+    self.lights = {
+        byDevice: {},
+        deadDevices: [],
+        numLights: 0,
+        changeLights: function (lights, event, source) {
+            // Returns number turned on
+            return _.reduce(lights, function (numTurnedOn, light) {
+                numTurnedOn += light.changeLight(event, source) == 'turnedOn' ? 1 : 0;
+                return numTurnedOn;
+            }, 0);
+        },
+        addOrGet: function (device, sensorLightCheck) {
+            if (_.contains(this.deadDevices, device)) return null;
+            var light = this.byDevice[device];
+            if (light == null) {
                 var vDev = self.getDev(device);
+                if (!vDev) {
+                    this.deadDevices.push(device);
+                    return null;
+                }
                 var light = new TabularLight(device, ++this.numLights, vDev, self);
                 light.setOnStatus(vDev);
                 this.byDevice[device] = light;
-                return light;
             }
+            light.sensorLightCheck = sensorLightCheck;
+            return light;
         }
-    } else {
-        self.lights.byDevice = {};
     }
+
 
     // Create base configuration for timetable entries and their switches/lights
     var schedule = [];
@@ -166,28 +177,20 @@ TabularScheduler.prototype.rerunableInit = function(firstRun) {
         var timetableRow = self.config.timetable[i];
         self.debug("Init for timetable entry #{}", i+1);
         var device = timetableRow.device;
-        if (!self.getDev(device)) {
-            if (firstRun) {
-                self.lights.byDevice = undefined;
-                self.lights.numLights = 0;
-                return false;
-            } else {
-                self.error("Missing details of vDev for device " + device + " on init even after waiting with a timeout");
-            }
+        var light = self.lights.addOrGet(device, false);
+        if (!!light) {
+            var scheduleEntry = {
+                light: light,
+                presence: timetableRow.presence,
+                days: self.getDays(timetableRow.days),
+                startTime: timetableRow.startTime,
+                endTime: timetableRow.endTime,
+                maxRandMs: timetableRow.randomise === 'yes' ? Math.round(self.config.maxRand * 60 * 1000) : 0,
+                num: schedule.length + 1
+            };
+            self.debug("init: added schedule entry {:S}", scheduleEntry);
+            schedule.push(scheduleEntry);
         }
-
-        var scheduleEntry = {
-            light: self.lights.addOrGet(device),
-            presence: timetableRow.presence,
-            days: self.getDays(timetableRow.days),
-            startTime: timetableRow.startTime,
-            endTime: timetableRow.endTime,
-            maxRandMs: timetableRow.randomise === 'yes' ? Math.round(self.config.maxRand*60*1000) : 0,
-            num: schedule.length + 1
-        };
-        self.debug("init: added schedule entry {:S}", scheduleEntry);
-        schedule.push(scheduleEntry);
-
     }
     self.schedule = schedule;
 
@@ -198,18 +201,32 @@ TabularScheduler.prototype.rerunableInit = function(firstRun) {
 
     if (self.config.sensorTrigger.set) {
         var sensorLights = [];
-        for(var i=0; i<self.config.sensorTrigger.switches.length; i++) {
+        for (var i = 0; i < self.config.sensorTrigger.switches.length; i++) {
             var device = self.config.sensorTrigger.switches[i];
-            if (!self.getDev(device)) {
-                if (firstRun) {
-                    self.lights.byDevice = undefined;
-                    self.lights.numLights = 0;
-                    return false;
-                } else {
-                    self.error("Missing details of vDev for device " + device + " on init even after waiting with a timeout");
-                }
-            }
-            sensorLights.push(self.lights.addOrGet(device));
+            var light = self.lights.addOrGet(device, self.config.sensorTrigger.lightCheck);
+            if (!!light) sensorLights.push(light);
+        }
+    }
+
+    if (self.lights.deadDevices.length > 0) {
+        if (firstRun) {
+            var wait = 12;
+            self.info("init: devices not all initialised when starting. Wait for {} secs", wait);
+            // Wait to do rest of initialization to ensure devices are setup and so can refer to their names
+            self.tmpTimeoutId = setTimeout(_.bind(self.rerunableInit, self, false), wait*1000);
+            return;
+        } else {
+            self.summary("init - {} device(s) not working: {}", self.lights.deadDevices.length,
+                self.lights.deadDevices.join(", ")); // TODO: change to error?
+        }
+    }
+
+    if (self.config.sensorTrigger.set) {
+        if (self.config.sensorTrigger.switches.length === 0) {
+            sensorLights = _.map(_.values(self.lights.byDevice), function(light) {
+                light.sensorLightCheck = self.config.sensorTrigger.lightCheck;
+                return light;
+            });
         }
         self.sensors = {
             "timeoutMillis": Math.round(60*1000*self.config.sensorTrigger.timeout),
@@ -223,18 +240,24 @@ TabularScheduler.prototype.rerunableInit = function(firstRun) {
         });
     }
 
+    // Get Astronomy config so SunCalc can be used to find today or tomorrow's sunset/sunrise
+    var ast = _.find(self.controller.instances, function(instance) {return instance.moduleId === 'Astronomy'});
+    self.longitude = ast.params.longitude;
+    self.latitude = ast.params.latitude;
+
     // Setup event listeners
     _.each(self.presenceModes, function (presenceMode) {
         self.debug("About to call controller.on(presenceMode={})", presenceMode);
         self.controller.on("presence." + presenceMode, self.callbackPresence);
     });
+
+    var now = self.now();
     if (self.config.activeHours.set) {
-        self.initActiveHours();
+        self.activeHours = self.calculateActiveHours(self.now(), self.config.activeHours);
         self.summary("Active hours: {start:Dt} -> {end:Dt}", self.activeHours);
     } else {
         self.activeHours = undefined;
     }
-    var now = self.now();
     if (self.activeHours === undefined || (now >= self.activeHours.start && now <= self.activeHours.end)) {
         self.vDev.doUpdate('level', 'on');
     }
@@ -247,22 +270,36 @@ TabularScheduler.prototype.rerunableInit = function(firstRun) {
 
     self.eventTimes = self.getEventTimes();
 
-    // Sync clock e.g. if time is 10:32:20.109 and polling interval is 60 seconds then
-    // wait until 10:33:00.000 i.e. for 39.891 seconds before starting polling
-    // In practice doesn't work very well
-    self.pollIntervalMs = self.config.pollInterval * 1000;
-    now = self.now();
-    var msIntoMin = now.getSeconds()*1000 + now.getMilliseconds();
-    var waitFor = self.pollIntervalMs - (msIntoMin % self.pollIntervalMs);
-    self.info("Will wait {}ms, so polling is synchronised to clock seconds", waitFor);
-    self.tmpTimeoutId = setTimeout(function() {
-        self.tmpTimeoutId = undefined;
-        self.checkEventsId = setInterval(_.bind(self.checkEvents, self, false), self.pollIntervalMs);
-        self.info("Synched to clock @{:DD}", self.now());
-    }, waitFor);
+    self.info("pollInterval {}", self.config.pollInterval);
+    if (self.config.pollInterval == 60) {
+        self.info("Using cron to check scheduled times every minute");
+        self.callbackCron = _.bind(self.checkEvents, self, false);
+        self.controller.on(self.cronName, self.callbackCron);
+        // Will get call back every minute - generally very fews seconds into minute which is much
+        // better than when using setTimeout with 1 second
+        self.controller.emit("cron.addTask", self.cronName,
+            {minute: null, hour:   null, weekDay: null, day: null, month: null});
+    } else {
+        // TODO: this doesn't work, simplify
+        // Sync clock e.g. if time is 10:32:20.109 and polling interval is 60 seconds then
+        // wait until 10:33:00.000 i.e. for 39.891 seconds before starting polling
+        // In practice doesn't work very well
+        self.pollIntervalMs = self.config.pollInterval * 1000;
+        now = self.now();
+        var msIntoMin = now.getSeconds() * 1000 + now.getMilliseconds();
+        var waitFor = self.pollIntervalMs - (msIntoMin % self.pollIntervalMs);
+        self.info("Will wait {}ms, so polling is synchronised to clock seconds", waitFor);
+        self.tmpTimeoutId = setTimeout(function () {
+            self.tmpTimeoutId = undefined;
+            self.checkEventsId = setInterval(_.bind(self.checkEvents, self, false), self.pollIntervalMs);
+            self.info("Synched to clock @{:DD}", self.now());
+        }, waitFor);
+    }
+
 
     return true;
 };
+
 
 TabularScheduler.prototype.stop = function () {
     var self = this;
@@ -273,6 +310,11 @@ TabularScheduler.prototype.stop = function () {
     if (!!self.sensors && !!self.sensors.offTimeout) clearTimeout(self.sensors.offTimeout);
     if (!!self.tmpTimeoutId) clearTimeout(self.tmpTimeoutId);
     if (!!self.checkEventsId) clearInterval(self.checkEventsId);
+    if (!!self.callbackCron) {
+        self.controller.emit("cron.removeTask", self.cronName);
+        self.controller.off(self.cronName, self.callbackCron);
+        self.callbackCron = undefined;
+    }
 
     self.processDeviceList(_.map(self.lights.byDevice, function(light) { return light.getDev(); }), function (vDev) {
         vDev.off('modify:metrics:level', self.callbackLight);
@@ -309,7 +351,7 @@ TabularScheduler.prototype.checkEvents = function() {
     var self = this;
 
     var now = self.now();
-    self.info("Checking for events @{:DD}", now);
+    self.debug("Checking for events @{:DD}", now);
     if (!!self.activeHours) {
         if (self.vDev.get('metrics:level') === 'off') {
             //self.debug("checkEvents not in active hours which are {start:Dt}->{end:Dt}", self.activeHours);
@@ -369,7 +411,7 @@ TabularScheduler.prototype.getEventTimes = function() {
 };
 
 TabularScheduler.prototype.getDays = function(daysStrings) {
-    return _.map(
+   return _.map(
             _.reduce(daysStrings, function(memo, daysString) {
             return _.union(memo, daysString.split(','));
             }, []),
@@ -473,42 +515,67 @@ TabularScheduler.prototype.calculateScheduledLight = function (scheduleEntry, li
         period.end = self.moveTime(period.end, 24);
         if (period.start <= now) period.start = self.moveTime(period.start, 24);
     }
-    scheduledLight.origstart = new Date(start < scheduledLight.origend ? start : period.start);
+    scheduledLight.origstart = new Date(period.start);
     scheduledLight.origend = new Date(period.end);
     scheduledLight.reschedule = new Date(period.end);
 
-    // TODO: below looks a bit overcomplicated
-    if (activeHours !== undefined) {
-        period = self.calcTimesWithinActiveHours(now, activeHours, period);
-    }
-
-    scheduledLight.start = period.start;
-    scheduledLight.end = period.end;
-
-    ['start','end'].forEach(function(event) {
-        if (scheduledLight[event] != null)
-           scheduledLight[event].setTime(scheduledLight[event].getTime() + scheduledLight['rand' + event]);});
+    self.info("      Entry #{} '{}' before adj:     {:Dt}->{:Dt}", scheduleEntry.num, light.getRef(),
+        scheduledLight.origstart, scheduledLight.origend);
 
     self.debug("scheduleEntry.days={:S}", scheduleEntry.days);
     self.debug("scheduledLight {:S}", scheduledLight);
     self.debug(".getDay() -> {}", scheduledLight.origstart.getDay());
     var validStartDay = _.contains(scheduleEntry.days,scheduledLight.origstart.getDay());
-    if (!validStartDay) scheduledLight.end = null;
 
-    if (scheduledLight.start != null &&
-        (   scheduledLight.start >= scheduledLight.end ||
-            scheduledLight.start < now ||
-            !validStartDay)) scheduledLight.start = null;
-
-    self.debug("   scheduled light {:S}", scheduledLight);
-
-    if (scheduledLight.end !== null) {
-        self.summary("   Scheduling entry #{} '{}' {:Dt}->{:Dt} to {:Dt}->{:Dt}", scheduleEntry.num, light.getRef(),
-            scheduledLight.origstart, scheduledLight.start, scheduledLight.origend, scheduledLight.end);
-    } else {
-        self.summary("   Entry #{} will re-schedule '{}' at {:Dt}", scheduleEntry.num, light.getRef(),
-            scheduledLight.reschedule);
+    var noStart = null;
+    var endComment = "";
+    if (activeHours !== undefined) {
+        period = self.calcTimesWithinActiveHours(now, activeHours, period);
+        if (period.start == null) {
+            noStart = "Start is not within active hours";
+        } else {
+            self.info("      Entry #{} '{}' active hours => {:Dt}->{:Dt}", scheduleEntry.num, light.getRef(),
+                period.start, period.end);
+        }
     }
+
+    scheduledLight.start = period.start;
+    scheduledLight.end = period.end;
+
+    ['start', 'end'].forEach(function (event) {
+        if (scheduledLight[event] != null)
+            scheduledLight[event].setTime(scheduledLight[event].getTime() + scheduledLight['rand' + event]);
+    });
+    if (scheduleEntry.maxRandMs !== 0) {
+        self.info("      Entry #{} '{}' randomise    => {:Dt}->{:Dt}", scheduleEntry.num, light.getRef(),
+            scheduledLight.start, scheduledLight.end);
+    }
+
+    if (noStart == null) {
+        if (!validStartDay) {
+            noStart = self.fmt.format("{:EEE} is not a valid start day", scheduledLight.start);
+            scheduledLight.end = null;
+        } else if (scheduledLight.start > scheduledLight.end) {
+            noStart = "Start after end";
+            scheduledLight.end = null;
+        } else if (scheduledLight.start.getTime() == scheduledLight.end.getTime()) {
+            noStart = "Start same as end";
+            scheduledLight.end = null;
+        } else if (scheduledLight.start < now) {
+            noStart = "Start in the past";
+        }
+    }
+
+    if (noStart != null) {
+        scheduledLight.start = null;
+        var endComment = scheduledLight.end == null ? "" : "turn off & ";
+        self.summary("   Entry #{} '{}' {}, will {}re-schedule at {:Dt}", scheduleEntry.num, light.getRef(),
+            noStart, endComment, scheduledLight.reschedule);
+    } else {
+        self.summary("   Entry #{} '{}' scheduled for:     {:Dt}->{:Dt}", scheduleEntry.num, light.getRef(),
+            scheduledLight.start, scheduledLight.end);
+    }
+    self.debug("   scheduled light {:S}", scheduledLight);
 
     return scheduledLight;
 };
@@ -517,25 +584,63 @@ TabularScheduler.prototype.now = function () {
     return new Date(); // Can be overridden for testing
 };
 
-TabularScheduler.prototype.calcActiveHours = function(activeHours, prefix, adjust) {
+TabularScheduler.prototype.calculateActiveHours = function(now, activeHoursCfg) {
     var self = this;
-    var now = self.now();
+
+    var addDays = function(was, days) {
+        var is = new Date(was);
+        is.setDate(is.getDate()+days);
+        // Found need to set hour to 1 to get current day's sunrise/sunset
+        is.setHours(1, 0, 1, 0); // TODO: DST?
+        return is;
+    }
+
+    var beforeActive = now;
+    var end   = self.getEventTime(activeHoursCfg.endType, beforeActive, activeHoursCfg.endTime);
+    if (end <= now) {
+        beforeActive = addDays(beforeActive, 1);
+        end = self.getEventTime(activeHoursCfg.endType, beforeActive, activeHoursCfg.endTime);
+    }
+
+    var prevDay = addDays(beforeActive, -1);
+    var start = self.getEventTime(activeHoursCfg.startType, prevDay, activeHoursCfg.startTime);
+
+    nextstart = self.getEventTime(activeHoursCfg.startType, beforeActive, activeHoursCfg.startTime);
+    nextend = self.getEventTime(activeHoursCfg.endType, addDays(beforeActive, 1), activeHoursCfg.endTime);
+
+    return {
+        start: start,
+        end: end,
+        nextstart: nextstart,
+        nextend: nextend
+    };
+}
+
+TabularScheduler.prototype.calcActiveHours = function(now, activeHours, prefix, adjust) {
+    var self = this;
 
     var activeHoursCfg = self.config.activeHours;
     var start = self.getEventTime(activeHoursCfg.startType, now, activeHoursCfg.startTime);
     var end   = self.getEventTime(activeHoursCfg.endType, now, activeHoursCfg.endTime);
 
-    if (end <= now) end = self.moveTime(end, 24);
-    if (start > end) start = self.moveTime(start, -24);
+    if (!prefix) {
+        if (end <= now) end = self.moveTime(end, 24);
+        if (start > end) start = self.moveTime(start, -24);
+    }
 
     activeHours[prefix + 'start'] = adjust === 0 ? start : self.moveTime(start, adjust);
     activeHours[prefix + 'end']   = adjust === 0 ? end   : self.moveTime(end, adjust);
+    if (activeHours[prefix + 'end'] < activeHours[prefix + 'start']) {
+        self.summary("Oops");
+        // TODO: temporary
+        activeHours[prefix + 'end']   = adjust === 0 ? end   : self.moveTime( activeHours[prefix + 'end'], 24);
+    }
 }
 
-TabularScheduler.prototype.initActiveHours = function() {
+TabularScheduler.prototype.initActiveHours = function(now) {
     var self = this;
     var activeHours = {};
-    self.calcActiveHours(activeHours, '', 0);
+    self.calcActiveHours(now, activeHours, '', 0);
     activeHours.nextstart = self.moveTime(activeHours.start, 24);
     activeHours.nextend = self.moveTime(activeHours.end, 24);
 
@@ -543,14 +648,13 @@ TabularScheduler.prototype.initActiveHours = function() {
     self.activeHours = activeHours;
 };
 
-TabularScheduler.prototype.updateActiveHours = function() {
+TabularScheduler.prototype.updateActiveHours = function(now) {
     var self = this;
-    var now = self.now();
 
     var activeHours = {};
     activeHours.start = self.activeHours.nextstart;
     activeHours.end   = self.activeHours.nextend;
-    self.calcActiveHours(activeHours, 'next', 24);
+    self.calcActiveHours(now, activeHours, 'next', 24);
 
     self.debug("updateActiveHours: {start:Dt}->{end:Dt}", activeHours);
     self.activeHours = activeHours;
@@ -572,25 +676,25 @@ TabularScheduler.prototype.getEventTime = function (type, now, timeAdjust) {
             time.setHours(hours, mins);
             break;
         case "sunset":
-            time.setTime(self.getSunset());
+            time.setTime(self.getSunset(now));
             break;
         case "sunsetPlus":
-            time.setTime(self.getSunset());
+            time.setTime(self.getSunset(now));
             time.setTime(time.getTime() + timeAdj);
             break;
         case "sunsetMinus":
-            time.setTime(self.getSunset());
+            time.setTime(self.getSunset(now));
             time.setTime(time.getTime() - timeAdj);
             break;
         case "sunrise":
-            time.setTime(self.getSunrise());
+            time.setTime(self.getSunrise(now));
             break;
         case "sunrisePlus":
-            time.setTime(self.getSunrise());
+            time.setTime(self.getSunrise(now));
             time.setTime(time.getTime() + timeAdj);
             break;
         case "sunriseMinus":
-            time.setTime(self.getSunrise());
+            time.setTime(self.getSunrise(now));
             time.setTime(time.getTime() - timeAdj);
             break;
         default:
@@ -613,26 +717,29 @@ TabularScheduler.prototype.moveTime = function(time, hours) {
     movedTime.setHours(toHour + hours);
     // Correct for DST
     movedTime.setHours(toHour, toMinute);
-    self.debug1("moveTime  from", time, "to", movedTime);
+    self.debug("moveTime  from {:D1} {:D1}", time, movedTime);
     return movedTime;
 };
 
-TabularScheduler.prototype.getSunset = function () {
+TabularScheduler.prototype.getSunset = function (now) {
     var self = this;
-    var sunset = self.getDeviceValue([
+    var times = SunCalc.getTimes(now, self.latitude, self.longitude);
+    return times.sunset;
+    /*var sunset = self.getDeviceValue([
         ['probeType', '=', 'astronomy_sun_altitude']
     ], 'metrics:sunset');
     self.debug("getSunset returns {:Dt}", sunset);
-    return sunset;
+    return sunset;*/
 };
 
-TabularScheduler.prototype.getSunrise = function () {
+TabularScheduler.prototype.getSunrise = function (now) {
     var self = this;
-    var sunrise = self.getDeviceValue([
+    return SunCalc.getTimes(now, self.latitude, self.longitude).sunrise;
+    /*var sunrise = self.getDeviceValue([
         ['probeType', '=', 'astronomy_sun_altitude']
     ], 'metrics:sunrise');
     self.debug1("Sunrise", sunrise);
-    return sunrise;
+    return sunrise;*/
 };
 
 TabularScheduler.prototype.handleSensor = function(vDev) {
@@ -677,8 +784,10 @@ TabularScheduler.prototype.handleActiveHoursStart = function() {
 TabularScheduler.prototype.handleActiveHoursEnd = function() {
     // Re-calculate active hours once a day when period ends
     var self = this;
-    self.updateActiveHours();
+
+    self.activeHours = self.calculateActiveHours(self.now(), self.config.activeHours);
     self.summary("Active hours: {start:Dt} -> {end:Dt}", self.activeHours);
+    // TODO: should next day's active hours
     // TODO: turn off lights that were triggered by sensors or schedule?
 
     self.vDev.doUpdate('level', 'off');
@@ -724,6 +833,7 @@ TabularLight = function(device, num, vDev, tabular) {
     this.onBy = undefined;
     this.startLevel = undefined;
     this.endLevel = undefined;
+    this.sensorLightCheck = undefined;
     this.tabular = tabular;
 };
 
@@ -751,14 +861,24 @@ TabularLight.prototype.changeLight = function (event, source) {
         if (source === 'sensor' && event === 'end' && self.onBy === 'schedule') {
             return '';
         }
-        // TODO: have different modes - only turn on light if already on, check light before turning on, always turn on
         // Record source turning light on, so don't turn off light after sensor off if we've hit light scheduled start
         if (event === 'start') {
             if (self.onBy !== 'schedule') self.onBy = source;
+            switch (self.sensorLightCheck) {
+                case 'no': break;
+                case 'query': self.setOnStatus(self.getDev()); // and then do same check as notification
+                case 'notification':
+                    if (self.onStatus) return '';
+                    break;
+
+            }
+            if (source === 'sensor') {
+            }
         } else {
             self.onBy = undefined;
         }
         var onOff = (event === "start") ? 'on' : 'off';
+        self.onStatus = event === "start";
         if (self.deviceType === 'switchMultilevel') {
             self.getDev().performCommand('exact', { level: onOff === "on" ? self.onLevel : 0 })
         } else {

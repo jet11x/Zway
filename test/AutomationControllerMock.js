@@ -2,6 +2,22 @@ AutomationController = function(clock) {
     this.devices = new DevicesCollectionMock(clock);
     this.cron = new CronMock(this, clock);
     this.onName = {};
+    this.instances = [
+        {
+            "instanceId": "0",
+            "moduleId": "Astronomy",
+            "active": "true",
+            "title": "Astronomy",
+            "params": {
+                "createAzimuthDevice": false,
+                "latitude": 51.63444,
+                "longitude": 0.33527
+            },
+            "id": 40,
+            "creationTime": 1503435217,
+            "category": "environment"
+        }
+    ];
 }
 
 AutomationController.prototype.emit = function() {
@@ -14,7 +30,7 @@ AutomationController.prototype.emit = function() {
             //throw "Don't understand emit " + type;
     }
     if (type === 'cron.addTask')
-    this.debug("AutomationController.emit: ", arguments);
+        this.debug("AutomationController.emit: ", arguments);
 }
 
 AutomationController.prototype.listCronEntries = function() {
@@ -210,6 +226,7 @@ function VirtualDev(id, title, type) {
     this.metrics = {};
     this.callbacks = {};
     this.order = {};
+    this.notify = true;
 
     this.performCommand = function(action, args) {
         var self = this;
@@ -237,8 +254,8 @@ function VirtualDev(id, title, type) {
                 console.error("Oops don't know action " + action);
             }
         }
-        //if (!!self.callbacks) self.callbacks.forEach(function(callback) {callback(self);});
-        Object.keys(self.callbacks).forEach(function(key) {self.callbacks[key](self);});
+        if (self.notify)
+            Object.keys(self.callbacks).forEach(function(key) {self.callbacks[key](self);});
     }
 
     this.reset = function() {
@@ -247,6 +264,7 @@ function VirtualDev(id, title, type) {
         this.lastAction = "";
         this.metrics["metrics:title"] = this.origTitle;
         this.metrics["metrics:level"] = type === "switchBinary" ? "off" : 0;
+        this.notify = true;
     }
 
     this.reset();

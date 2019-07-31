@@ -10,7 +10,7 @@
   "homepage": "https://github.com/jet11x/Zway/tree/master/TabularScheduler",
   "icon": "icon.png",
   "moduleName": "TabularScheduler",
-  "version": "0.1.0",
+  "version": "0.0.5",
   "maturity": "beta",
   "defaults": {
     "title": "__m_title__",
@@ -35,7 +35,8 @@
     "maxRand": 10,
     "onLevel": 70,
     "sensorTrigger": {
-      "timeout": "5"
+      "timeout": "5",
+      "lightCheck": "notification"
     },
     "pollInterval": "60",
     "logging": "summary"
@@ -198,6 +199,14 @@
               "set"
             ]
           },
+          "lightCheck": {
+            "title": "__sensor_light_check_title__",
+            "type": "select",
+            "enum": ["no", "notification", "query"],
+            "dependencies": [
+              "set"
+            ]
+          },
           "switches": {
             "items": {
               "datasource": "namespaces",
@@ -214,7 +223,7 @@
       },
       "pollInterval": {
         "type": "select",
-        "enum": ["60","30","15","10","5","1"],
+        "enum": ["60","5","1"],
         "title": "__poll_interval_title__"
       },
       "logging": {
@@ -389,6 +398,20 @@
           },
           "timeout": {
             "helper": "__sensor_timeout__"
+          },
+          "lightCheck": {
+            "optionLabels": [
+              "__sensor_light_check_no__",
+              "__sensor_light_check_notification__",
+              "__sensor_light_check_query__"],
+            "removeDefaultNone": true,
+            "helpers": [
+              "__sensor_light_check_helper__",
+              "__sensor_light_check_helper_notification__",
+              "__sensor_light_check_helper_query__",
+              "__sensor_light_check_no1__",
+              "__sensor_light_check_no2__"
+            ]
           },
           "switches": {
             "fields": {

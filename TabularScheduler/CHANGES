@@ -1,3 +1,9 @@
+0.2.0 31-Jul-19
+  * Keep on working with 1 or more failed devices
+  * Complete re-write ...
+  * Get sunrise/sunset by getting Long/Lat from Astronomy plugin and then call library xxx directly
+  * Cron to 60 second interval, interval for 1 and 5 seconds
+
 0.1.0 20-Jan-18
   * Specify on level for multilevel lights
   * Polling intervals to select
